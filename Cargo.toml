@@ -1,12 +1,12 @@
 [package]
-name = "arwtojpg"
+name = "rawtojpg"
 edition = "2021"
 version = "0.2.1"
 authors = ["Chris Down <chris@chrisdown.name>"]
-description = "A very fast embedded JPEG extractor from Sony ARW files."
+description = "A very fast embedded JPEG extractor from RAW files."
 repository = "https://github.com/cdown/arwtojpg"
 readme = "README.md"
-keywords = ["raw", "arw", "sony", "jpeg", "jpg"]
+keywords = ["raw", "camera", "extract", "jpeg", "jpg"]
 categories = ["command-line-utilities"]
 license = "MIT"
 
