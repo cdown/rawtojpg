@@ -1,8 +1,13 @@
 use anyhow::{ensure, Context, Result};
 use futures::stream::StreamExt;
 use memmap2::{Mmap, MmapOptions};
+use nix::fcntl::posix_fadvise;
+use nix::fcntl::PosixFadviseAdvice;
+use nix::sys::mman::{madvise, MmapAdvise};
+use nix::unistd::{sysconf, SysconfVar};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::ptr::NonNull;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::fs::File;
@@ -15,12 +20,42 @@ const fn is_jpeg_soi(buf: &[u8]) -> bool {
     buf[0] == 0xff && buf[1] == 0xd8
 }
 
+unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
+    let page_size: usize = sysconf(SysconfVar::PAGE_SIZE).unwrap().unwrap() as usize;
+
+    let page_aligned_start = (addr as usize) & !(page_size - 1);
+
+    let original_end = addr as usize + length;
+    let page_aligned_end = (original_end + page_size - 1) & !(page_size - 1);
+
+    let aligned_length = page_aligned_end - page_aligned_start;
+    let aligned_addr = page_aligned_start as *mut _;
+    let aligned_nonnull = NonNull::new(aligned_addr)
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert aligned address to NonNull"))?;
+
+    madvise(aligned_nonnull, aligned_length, advice).context("Failed to madvise()")
+}
+
 async fn mmap_arw(arw_fd: i32) -> Result<Mmap> {
+    // We only access a small part of the file, don't read in more than necessary.
+    posix_fadvise(arw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM).unwrap();
+
     let arw_buf = unsafe { MmapOptions::new().map(arw_fd).unwrap() };
+
+    let base_length = arw_buf.len();
+    unsafe {
+        madvise_aligned(
+            arw_buf.as_ptr() as *mut _,
+            base_length,
+            MmapAdvise::MADV_RANDOM,
+        )
+        .unwrap();
+    }
+
     Ok(arw_buf)
 }
 
-fn extract_jpeg(arw_buf: &[u8]) -> Result<&[u8]> {
+fn extract_jpeg(arw_fd: i32, arw_buf: &[u8]) -> Result<&[u8]> {
     let exif = rexif::parse_buffer(arw_buf).context("Failed to parse EXIF data")?;
     let jpeg_offset_tag = 0x0201; // JPEGInterchangeFormat
     let jpeg_length_tag = 0x0202; // JPEGInterchangeFormatLength
@@ -37,6 +72,18 @@ fn extract_jpeg(arw_buf: &[u8]) -> Result<&[u8]> {
 
     let jpeg_offset = jpeg_offset.context("Cannot find embedded JPEG")?;
     let jpeg_sz = jpeg_sz.context("Cannot find embedded JPEG")?;
+
+    posix_fadvise(
+        arw_fd,
+        jpeg_offset as i64,
+        jpeg_sz as i64,
+        PosixFadviseAdvice::POSIX_FADV_WILLNEED,
+    )
+    .unwrap();
+    unsafe {
+        let em_jpeg_ptr = arw_buf.as_ptr().add(jpeg_offset);
+        madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED).unwrap();
+    }
 
     ensure!(
         (jpeg_offset + jpeg_sz) <= arw_buf.len(),
@@ -77,7 +124,7 @@ async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
         .context("Failed to open ARW file")?;
     let arw_fd = in_file.as_raw_fd();
     let arw_buf = mmap_arw(arw_fd).await?;
-    let jpeg_buf = extract_jpeg(&arw_buf)?;
+    let jpeg_buf = extract_jpeg(arw_fd, &arw_buf)?;
     write_jpeg(out_dir, &filename, jpeg_buf).await?;
     Ok(())
 }
