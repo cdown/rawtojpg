@@ -1,7 +1,7 @@
 # rawtojpg
 
-rawtojpg provides a much faster way to extract embedded JPEGs from Sony raw
-files than exiftool's `-JpgFromRaw`. In a directory with ~1200 files, rawtojpg
+rawtojpg provides a much faster way to extract embedded JPEGs from RAW files
+than exiftool's `-JpgFromRaw`. In a directory with ~1200 files, rawtojpg
 extracts JPEGs about 17 times faster than exiftool:
 
     % sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
