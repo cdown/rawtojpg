@@ -1,0 +1,29 @@
+[package]
+name = "arwtojpg"
+edition = "2021"
+version = "0.1.0"
+authors = ["Chris Down <chris@chrisdown.name>"]
+description = "A very fast embedded JPEG extractor from Sony ARW files."
+repository = "https://github.com/cdown/arwtojpg"
+readme = "README.md"
+keywords = ["raw", "arw", "sony", "jpeg", "jpg"]
+categories = ["command-line-utilities"]
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.83"
+futures = "0.3.30"
+memmap2 = "0.9.4"
+
+[dependencies.nix]
+version = "0.28.0"
+features = ["feature", "fs", "mman"]
+default-features = false
+
+[dependencies.tokio]
+version = "1.37.0"
+features = ["fs", "io-util", "macros", "rt-multi-thread"]
+
+[dependencies.tokio-stream]
+version = "0.1.15"
+features = ["fs"]
