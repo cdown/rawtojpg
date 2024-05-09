@@ -17,10 +17,3 @@ extracts JPEGs about 17 times faster than exiftool:
             System time (seconds): 8.95
             Percent of CPU this job got: 46%
             Elapsed (wall clock) time (h:mm:ss or m:ss): 1:14.77
-
-This is much faster because, compared to exiftool:
-
-1. arwtojpg uses fadvise/madvise to avoid reading too much of the large ARW
-   file unnecessarily due to readahead;
-2. arwtojpg can process multiple files concurrently;
-3. arwtojpg can process reading and writing concurrently.
