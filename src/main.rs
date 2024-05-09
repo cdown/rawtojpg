@@ -36,27 +36,27 @@ unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> R
     madvise(aligned_nonnull, aligned_length, advice).context("Failed to madvise()")
 }
 
-async fn mmap_arw(arw_fd: i32) -> Result<Mmap> {
+async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
-    posix_fadvise(arw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM).unwrap();
+    posix_fadvise(raw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM).unwrap();
 
-    let arw_buf = unsafe { MmapOptions::new().map(arw_fd).unwrap() };
+    let raw_buf = unsafe { MmapOptions::new().map(raw_fd).unwrap() };
 
-    let base_length = arw_buf.len();
+    let base_length = raw_buf.len();
     unsafe {
         madvise_aligned(
-            arw_buf.as_ptr() as *mut _,
+            raw_buf.as_ptr() as *mut _,
             base_length,
             MmapAdvise::MADV_RANDOM,
         )
         .unwrap();
     }
 
-    Ok(arw_buf)
+    Ok(raw_buf)
 }
 
-fn extract_jpeg(arw_fd: i32, arw_buf: &[u8]) -> Result<&[u8]> {
-    let exif = rexif::parse_buffer(arw_buf).context("Failed to parse EXIF data")?;
+fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
+    let exif = rexif::parse_buffer(raw_buf).context("Failed to parse EXIF data")?;
     let jpeg_offset_tag = 0x0201; // JPEGInterchangeFormat
     let jpeg_length_tag = 0x0202; // JPEGInterchangeFormatLength
     let mut jpeg_offset = None;
@@ -74,27 +74,27 @@ fn extract_jpeg(arw_fd: i32, arw_buf: &[u8]) -> Result<&[u8]> {
     let jpeg_sz = jpeg_sz.context("Cannot find embedded JPEG")?;
 
     posix_fadvise(
-        arw_fd,
+        raw_fd,
         jpeg_offset as i64,
         jpeg_sz as i64,
         PosixFadviseAdvice::POSIX_FADV_WILLNEED,
     )
     .unwrap();
     unsafe {
-        let em_jpeg_ptr = arw_buf.as_ptr().add(jpeg_offset);
+        let em_jpeg_ptr = raw_buf.as_ptr().add(jpeg_offset);
         madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED).unwrap();
     }
 
     ensure!(
-        (jpeg_offset + jpeg_sz) <= arw_buf.len(),
+        (jpeg_offset + jpeg_sz) <= raw_buf.len(),
         "JPEG data exceeds file size"
     );
     ensure!(
-        is_jpeg_soi(&arw_buf[jpeg_offset..]),
+        is_jpeg_soi(&raw_buf[jpeg_offset..]),
         "Missing JPEG SOI marker"
     );
 
-    Ok(&arw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
+    Ok(&raw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
 }
 
 async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<()> {
@@ -121,10 +121,10 @@ async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
     let filename = entry_path.file_name().unwrap().to_string_lossy();
     let in_file = File::open(&entry_path)
         .await
-        .context("Failed to open ARW file")?;
-    let arw_fd = in_file.as_raw_fd();
-    let arw_buf = mmap_arw(arw_fd).await?;
-    let jpeg_buf = extract_jpeg(arw_fd, &arw_buf)?;
+        .context("Failed to open raw file")?;
+    let raw_fd = in_file.as_raw_fd();
+    let raw_buf = mmap_raw(raw_fd).await?;
+    let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
     write_jpeg(out_dir, &filename, jpeg_buf).await?;
     Ok(())
 }
@@ -141,7 +141,7 @@ async fn process_directory(in_dir: &Path, out_dir: &'static Path) -> Result<()> 
     while let Some(entry) = ent_stream.next().await {
         match entry {
             Ok(e)
-                if e.path().extension().map_or(false, |ext| ext == "ARW")
+                if e.path().extension().map_or(false, |ext| ext == "raw")
                     && e.metadata().await.unwrap().is_file() =>
             {
                 let permit = semaphore.clone().acquire_owned().await.unwrap();
@@ -177,7 +177,7 @@ async fn main() -> Result<()> {
     } else {
         PathBuf::from(".")
     };
-    let output_dir = Box::leak(Box::new(output_dir)); // It's gonna get used for each ARW file and
+    let output_dir = Box::leak(Box::new(output_dir)); // It's gonna get used for each raw file and
                                                       // would need a copy for .filter_map(),
                                                       // better to just make it &'static
 

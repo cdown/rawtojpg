@@ -20,7 +20,7 @@ extracts JPEGs about 17 times faster than exiftool:
 
 This is much faster because, compared to exiftool:
 
-1. arwtojpg uses fadvise/madvise to avoid reading too much of the large ARW
+1. rawtojpg uses fadvise/madvise to avoid reading too much of the large RAW
    file unnecessarily due to readahead;
-2. arwtojpg can process multiple files concurrently;
-3. arwtojpg can process reading and writing concurrently.
+2. rawtojpg can process multiple files concurrently;
+3. rawtojpg can process reading and writing concurrently.
