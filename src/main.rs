@@ -64,9 +64,9 @@ async fn mmap_arw(arw_fd: i32) -> Result<Mmap> {
             MmapAdvise::MADV_RANDOM,
         )
         .unwrap();
-        let advised_ptr = arw_buf.as_ptr().add(OFFSET_POSITION);
+        let hdr_ptr = arw_buf.as_ptr().add(OFFSET_POSITION);
         madvise_aligned(
-            advised_ptr as *mut _,
+            hdr_ptr as *mut _,
             LENGTH_POSITION - OFFSET_POSITION + 4,
             MmapAdvise::MADV_WILLNEED,
         )
@@ -90,8 +90,8 @@ fn extract_jpeg(arw_fd: i32, arw_buf: &[u8]) -> Result<&[u8]> {
     )
     .unwrap();
     unsafe {
-        let advised_ptr = arw_buf.as_ptr().add(jpeg_offset);
-        madvise_aligned(advised_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED).unwrap();
+        let em_jpeg_ptr = arw_buf.as_ptr().add(jpeg_offset);
+        madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED).unwrap();
     }
 
     ensure!(
