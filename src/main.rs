@@ -121,7 +121,10 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
     Ok(())
 }
 
-const MAX_OPEN_FILES: usize = 256;
+// Determined by anecdotal profiling. When reading from a CFexpress card and writing to NVMe, 8
+// is about the right number of files that we don't end up with a lot of contention while still
+// making optimal forward progress.
+const MAX_OPEN_FILES: usize = 8;
 
 async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
     let filename = entry_path.file_name().unwrap().to_string_lossy();
