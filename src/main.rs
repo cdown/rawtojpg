@@ -16,12 +16,6 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReadDirStream;
 
-// Reverse engineered from looking at a bunch of ARW files. Obviously not stable, tested on Sony a1
-// with 1.31 firmware. Can be extracted by iterating through EXIF, but that's much slower, and
-// these are static.
-const OFFSET_POSITION: usize = 0x21c18;
-const LENGTH_POSITION: usize = 0x21c24;
-
 const fn is_jpeg_soi(buf: &[u8]) -> bool {
     buf[0] == 0xff && buf[1] == 0xd8
 }
@@ -45,30 +39,15 @@ unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> R
 async fn mmap_arw(arw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
     posix_fadvise(arw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM).unwrap();
-    posix_fadvise(
-        arw_fd,
-        OFFSET_POSITION as i64,
-        (LENGTH_POSITION - OFFSET_POSITION + 4) as i64,
-        PosixFadviseAdvice::POSIX_FADV_WILLNEED,
-    )
-    .unwrap();
 
     let arw_buf = unsafe { MmapOptions::new().map(arw_fd).unwrap() };
 
     let base_length = arw_buf.len();
-    ensure!(base_length > LENGTH_POSITION + 4);
     unsafe {
         madvise_aligned(
             arw_buf.as_ptr() as *mut _,
             base_length,
             MmapAdvise::MADV_RANDOM,
-        )
-        .unwrap();
-        let hdr_ptr = arw_buf.as_ptr().add(OFFSET_POSITION);
-        madvise_aligned(
-            hdr_ptr as *mut _,
-            LENGTH_POSITION - OFFSET_POSITION + 4,
-            MmapAdvise::MADV_WILLNEED,
         )
         .unwrap();
     }
@@ -77,10 +56,22 @@ async fn mmap_arw(arw_fd: i32) -> Result<Mmap> {
 }
 
 fn extract_jpeg(arw_fd: i32, arw_buf: &[u8]) -> Result<&[u8]> {
-    let jpeg_offset: usize =
-        u32::from_le_bytes(arw_buf[OFFSET_POSITION..OFFSET_POSITION + 4].try_into()?).try_into()?;
-    let jpeg_sz: usize =
-        u32::from_le_bytes(arw_buf[LENGTH_POSITION..LENGTH_POSITION + 4].try_into()?).try_into()?;
+    let exif = rexif::parse_buffer(arw_buf).context("Failed to parse EXIF data")?;
+    let jpeg_offset_tag = 0x0201; // JPEGInterchangeFormat
+    let jpeg_length_tag = 0x0202; // JPEGInterchangeFormatLength
+    let mut jpeg_offset = None;
+    let mut jpeg_sz = None;
+
+    for entry in &exif.entries {
+        if entry.ifd.tag == jpeg_offset_tag {
+            jpeg_offset = Some(entry.value.to_i64(0).unwrap() as usize);
+        } else if entry.ifd.tag == jpeg_length_tag {
+            jpeg_sz = Some(entry.value.to_i64(0).unwrap() as usize);
+        }
+    }
+
+    let jpeg_offset = jpeg_offset.context("Cannot find embedded JPEG")?;
+    let jpeg_sz = jpeg_sz.context("Cannot find embedded JPEG")?;
 
     posix_fadvise(
         arw_fd,

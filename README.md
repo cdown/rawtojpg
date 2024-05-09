@@ -22,8 +22,5 @@ This is much faster because, compared to exiftool:
 
 1. arwtojpg uses fadvise/madvise to avoid reading too much of the large ARW
    file unnecessarily due to readahead;
-2. arwtojpg make use of the fact that the JPEG offset and length locations in
-   the ARW are static (as is expected on any camera with a fast burst rate to
-   facilitate writing quickly);
-3. arwtojpg can process multiple files concurrently;
-4. arwtojpg can process reading and writing concurrently.
+2. arwtojpg can process multiple files concurrently;
+3. arwtojpg can process reading and writing concurrently.
