@@ -7,7 +7,7 @@ use nix::fcntl::PosixFadviseAdvice;
 use nix::sys::mman::{madvise, MmapAdvise};
 use nix::unistd::{sysconf, SysconfVar};
 use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -32,6 +32,13 @@ struct Args {
     /// How many files to process at once
     #[arg(short, long, default_value_t = 8)]
     transfers: usize,
+
+    /// Look for this extension in addition to the default list.
+    ///
+    /// Default list: arw, cr2, crw, dng, erf, kdc, mef, mrw, nef, nrw, orf, pef, raf, raw, rw2,
+    /// rwl, sr2, srf, srw, x3f
+    #[arg(short, long)]
+    extension: Option<OsString>,
 }
 
 const fn is_jpeg_soi(buf: &[u8]) -> bool {
@@ -142,7 +149,12 @@ async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn process_directory(in_dir: &Path, out_dir: &'static Path, transfers: usize) -> Result<()> {
+async fn process_directory(
+    in_dir: &Path,
+    out_dir: &'static Path,
+    ext: Option<OsString>,
+    transfers: usize,
+) -> Result<()> {
     let raw_extensions = [
         "arw", "cr2", "crw", "dng", "erf", "kdc", "mef", "mrw", "nef", "nrw", "orf", "pef", "raf",
         "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f",
@@ -152,6 +164,10 @@ async fn process_directory(in_dir: &Path, out_dir: &'static Path, transfers: usi
     for &ext in &raw_extensions {
         valid_extensions.insert(OsStr::new(ext).to_owned());
         valid_extensions.insert(OsStr::new(&ext.to_uppercase()).to_owned());
+    }
+
+    if let Some(ext) = ext {
+        valid_extensions.insert(ext);
     }
 
     let ent = fs::read_dir(in_dir)
@@ -200,7 +216,7 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&output_dir)
         .await
         .context("Failed to create output directory")?;
-    process_directory(&args.input_dir, output_dir, args.transfers).await?;
+    process_directory(&args.input_dir, output_dir, args.extension, args.transfers).await?;
 
     Ok(())
 }
