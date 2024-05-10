@@ -30,7 +30,7 @@ struct Args {
     output_dir: PathBuf,
 
     /// How many files to process at once
-    #[arg(long, default_value_t = 8)]
+    #[arg(short, long, default_value_t = 8)]
     transfers: usize,
 }
 
