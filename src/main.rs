@@ -58,7 +58,7 @@ unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> R
     let aligned_nonnull = NonNull::new(aligned_addr)
         .ok_or_else(|| anyhow::anyhow!("Failed to convert aligned address to NonNull"))?;
 
-    madvise(aligned_nonnull, aligned_length, advice).context("Failed to madvise()")
+    Ok(madvise(aligned_nonnull, aligned_length, advice)?)
 }
 
 async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
@@ -81,7 +81,7 @@ async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
 }
 
 fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
-    let exif = rexif::parse_buffer(raw_buf).context("Failed to parse EXIF data")?;
+    let exif = rexif::parse_buffer(raw_buf)?;
     let jpeg_offset_tag = 0x0201; // JPEGInterchangeFormat
     let jpeg_length_tag = 0x0202; // JPEGInterchangeFormatLength
     let mut jpeg_offset = None;
@@ -127,21 +127,14 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
     output_file.set_extension("jpg");
     println!("{filename}");
 
-    let mut out_file = File::create(&output_file)
-        .await
-        .context("Failed to open output file")?;
-    out_file
-        .write_all(jpeg_buf)
-        .await
-        .context("Failed to write to output file")?;
+    let mut out_file = File::create(&output_file).await?;
+    out_file.write_all(jpeg_buf).await?;
     Ok(())
 }
 
 async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
     let filename = entry_path.file_name().unwrap().to_string_lossy();
-    let in_file = File::open(&entry_path)
-        .await
-        .context("Failed to open raw file")?;
+    let in_file = File::open(&entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
     let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
@@ -170,9 +163,7 @@ async fn process_directory(
         valid_extensions.insert(ext);
     }
 
-    let ent = fs::read_dir(in_dir)
-        .await
-        .context("Failed to open input directory")?;
+    let ent = fs::read_dir(in_dir).await?;
     let mut ent_stream = ReadDirStream::new(ent);
     let semaphore = Arc::new(Semaphore::new(transfers));
 
@@ -213,9 +204,7 @@ async fn main() -> Result<()> {
                                                            // would need a copy for .filter_map(),
                                                            // better to just make it &'static
 
-    fs::create_dir_all(&output_dir)
-        .await
-        .context("Failed to create output directory")?;
+    fs::create_dir_all(&output_dir).await?;
     process_directory(&args.input_dir, output_dir, args.extension, args.transfers).await?;
 
     Ok(())
