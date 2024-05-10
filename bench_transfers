@@ -1,0 +1,31 @@
+#!/bin/bash
+
+executable="target/release/rawtojpg"
+input_dir="/mnt/sdcard/DCIM/101MSDCF"
+output_dir="/home/cdown/testdir"
+runs=50
+warmups=10
+
+prepare_cmd="sh -c 'rm -rf $output_dir; mkdir $output_dir' && sudo sh -c 'sync && echo 3 > /proc/sys/vm/drop_caches'"
+
+build_project() {
+    echo "Building the project..."
+    cargo build --release
+}
+
+benchmark_transfers() {
+    local transfers=$1
+    echo "Benchmarking with max_transfers set to $transfers..."
+    hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs $runs -N "$executable $input_dir $output_dir --transfers $transfers"
+}
+
+main() {
+    build_project
+    for ((i=0; i<=10; i++)); do
+        max_transfers=$((1 << i))
+        benchmark_transfers $max_transfers
+    done
+}
+
+# Run the main function
+main
