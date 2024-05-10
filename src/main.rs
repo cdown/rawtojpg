@@ -26,6 +26,10 @@ struct Args {
     /// Output directory to store extracted JPEGs
     #[arg(default_value = ".")]
     output_dir: PathBuf,
+
+    /// How many files to process at once
+    #[arg(long, default_value_t = 8)]
+    transfers: usize,
 }
 
 const fn is_jpeg_soi(buf: &[u8]) -> bool {
@@ -124,11 +128,6 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
     Ok(())
 }
 
-// Determined by anecdotal profiling. When reading from a CFexpress card and writing to NVMe, 8
-// is about the right number of files that we don't end up with a lot of contention while still
-// making optimal forward progress.
-const MAX_OPEN_FILES: usize = 8;
-
 async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
     let filename = entry_path.file_name().unwrap().to_string_lossy();
     let in_file = File::open(&entry_path)
@@ -141,12 +140,12 @@ async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn process_directory(in_dir: &Path, out_dir: &'static Path) -> Result<()> {
+async fn process_directory(in_dir: &Path, out_dir: &'static Path, transfers: usize) -> Result<()> {
     let ent = fs::read_dir(in_dir)
         .await
         .context("Failed to open input directory")?;
     let mut ent_stream = ReadDirStream::new(ent);
-    let semaphore = Arc::new(Semaphore::new(MAX_OPEN_FILES));
+    let semaphore = Arc::new(Semaphore::new(transfers));
 
     let mut tasks: Vec<JoinHandle<Result<()>>> = Vec::new();
 
@@ -186,7 +185,7 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&output_dir)
         .await
         .context("Failed to create output directory")?;
-    process_directory(&args.input_dir, output_dir).await?;
+    process_directory(&args.input_dir, output_dir, args.transfers).await?;
 
     Ok(())
 }
