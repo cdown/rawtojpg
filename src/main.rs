@@ -1,4 +1,5 @@
 use anyhow::{ensure, Context, Result};
+use clap::Parser;
 use futures::stream::StreamExt;
 use memmap2::{Mmap, MmapOptions};
 use nix::fcntl::posix_fadvise;
@@ -15,6 +16,17 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReadDirStream;
+
+#[derive(Parser)]
+#[command(author, version, about)]
+struct Args {
+    /// Input directory containing RAW files
+    input_dir: PathBuf,
+
+    /// Output directory to store extracted JPEGs
+    #[arg(default_value = ".")]
+    output_dir: PathBuf,
+}
 
 const fn is_jpeg_soi(buf: &[u8]) -> bool {
     buf[0] == 0xff && buf[1] == 0xd8
@@ -165,26 +177,16 @@ async fn process_directory(in_dir: &Path, out_dir: &'static Path) -> Result<()> 
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} input_dir [output_dir]", args[0]);
-        std::process::exit(1);
-    }
+    let args = Args::parse();
 
-    let in_dir = PathBuf::from(&args[1]);
-    let output_dir = if args.len() > 2 {
-        PathBuf::from(&args[2])
-    } else {
-        PathBuf::from(".")
-    };
-    let output_dir = Box::leak(Box::new(output_dir)); // It's gonna get used for each raw file and
-                                                      // would need a copy for .filter_map(),
-                                                      // better to just make it &'static
+    let output_dir = Box::leak(Box::new(args.output_dir)); // It's gonna get used for each raw file and
+                                                           // would need a copy for .filter_map(),
+                                                           // better to just make it &'static
 
     fs::create_dir_all(&output_dir)
         .await
         .context("Failed to create output directory")?;
-    process_directory(&in_dir, output_dir).await?;
+    process_directory(&args.input_dir, output_dir).await?;
 
     Ok(())
 }
