@@ -148,16 +148,18 @@ async fn process_directory(
     ext: Option<OsString>,
     transfers: usize,
 ) -> Result<()> {
-    let raw_extensions = [
+    let mut valid_extensions: HashSet<OsString> = [
         "arw", "cr2", "crw", "dng", "erf", "kdc", "mef", "mrw", "nef", "nrw", "orf", "pef", "raf",
         "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f",
-    ];
-
-    let mut valid_extensions = HashSet::new();
-    for &ext in &raw_extensions {
-        valid_extensions.insert(OsStr::new(ext).to_owned());
-        valid_extensions.insert(OsStr::new(&ext.to_uppercase()).to_owned());
-    }
+    ]
+    .iter()
+    .flat_map(|&ext| {
+        [
+            OsStr::new(ext).to_owned(),
+            OsStr::new(&ext.to_uppercase()).to_owned(),
+        ]
+    })
+    .collect();
 
     if let Some(ext) = ext {
         valid_extensions.insert(ext);
