@@ -6,6 +6,8 @@ use nix::fcntl::posix_fadvise;
 use nix::fcntl::PosixFadviseAdvice;
 use nix::sys::mman::{madvise, MmapAdvise};
 use nix::unistd::{sysconf, SysconfVar};
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -141,6 +143,17 @@ async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
 }
 
 async fn process_directory(in_dir: &Path, out_dir: &'static Path, transfers: usize) -> Result<()> {
+    let raw_extensions = [
+        "arw", "cr2", "crw", "dng", "erf", "kdc", "mef", "mrw", "nef", "nrw", "orf", "pef", "raf",
+        "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f",
+    ];
+
+    let mut valid_extensions = HashSet::new();
+    for &ext in &raw_extensions {
+        valid_extensions.insert(OsStr::new(ext).to_owned());
+        valid_extensions.insert(OsStr::new(&ext.to_uppercase()).to_owned());
+    }
+
     let ent = fs::read_dir(in_dir)
         .await
         .context("Failed to open input directory")?;
@@ -152,7 +165,9 @@ async fn process_directory(in_dir: &Path, out_dir: &'static Path, transfers: usi
     while let Some(entry) = ent_stream.next().await {
         match entry {
             Ok(e)
-                if e.path().extension().map_or(false, |ext| ext == "raw")
+                if e.path()
+                    .extension()
+                    .map_or(false, |ext| valid_extensions.contains(ext))
                     && e.metadata().await.unwrap().is_file() =>
             {
                 let permit = semaphore.clone().acquire_owned().await.unwrap();
