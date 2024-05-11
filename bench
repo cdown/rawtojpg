@@ -1,0 +1,19 @@
+#!/bin/bash -e
+
+executable="target/release/rawtojpg"
+input_dir="/mnt/sdcard/DCIM/101MSDCF"
+output_dir="/home/cdown/testdir"
+runs=50
+warmups=5
+
+prepare_cmd="sh -c 'rm -rf $output_dir; mkdir $output_dir' && sudo sh -c 'sync && echo 3 > /proc/sys/vm/drop_caches'"
+
+cargo build --release
+hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs "$runs" -N "$executable $input_dir $output_dir $*"
+
+# Validate the files all look fine
+in=( "$input_dir"/*.ARW )
+out=( "$output_dir"/*.jpg )
+
+(( "${#in[@]}" > 0 )) && (( "${#in[@]}" == "${#out[@]}" ))
+! file "${out[@]}" | grep -vq 'JPEG image data'
