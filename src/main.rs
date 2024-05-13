@@ -133,12 +133,15 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
 }
 
 async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
-    let filename = entry_path.file_name().unwrap().to_string_lossy();
+    let filename = entry_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap();
     let in_file = File::open(&entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
     let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
-    write_jpeg(out_dir, &filename, jpeg_buf).await?;
+    write_jpeg(out_dir, filename, jpeg_buf).await?;
     Ok(())
 }
 
