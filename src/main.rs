@@ -93,6 +93,9 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
         } else if entry.ifd.tag == jpeg_length_tag {
             jpeg_sz = Some(entry.value.to_i64(0).unwrap() as usize);
         }
+        if jpeg_offset.is_some() && jpeg_sz.is_some() {
+            break;
+        }
     }
 
     let jpeg_offset = jpeg_offset.context("Cannot find embedded JPEG")?;
