@@ -104,6 +104,15 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
     let jpeg_offset = jpeg_offset.context("Cannot find embedded JPEG")?;
     let jpeg_sz = jpeg_sz.context("Cannot find embedded JPEG")?;
 
+    ensure!(
+        (jpeg_offset + jpeg_sz) <= raw_buf.len(),
+        "JPEG data exceeds file size"
+    );
+    ensure!(
+        is_jpeg_soi(&raw_buf[jpeg_offset..]),
+        "Missing JPEG SOI marker"
+    );
+
     posix_fadvise(
         raw_fd,
         jpeg_offset as i64,
@@ -115,15 +124,6 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
         let em_jpeg_ptr = raw_buf.as_ptr().add(jpeg_offset);
         madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED).unwrap();
     }
-
-    ensure!(
-        (jpeg_offset + jpeg_sz) <= raw_buf.len(),
-        "JPEG data exceeds file size"
-    );
-    ensure!(
-        is_jpeg_soi(&raw_buf[jpeg_offset..]),
-        "Missing JPEG SOI marker"
-    );
 
     Ok(&raw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
 }
