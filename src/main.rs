@@ -1,6 +1,5 @@
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
-use futures::stream::StreamExt;
 use memmap2::{Mmap, MmapOptions};
 use nix::fcntl::posix_fadvise;
 use nix::fcntl::PosixFadviseAdvice;
@@ -18,7 +17,6 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
-use tokio_stream::wrappers::ReadDirStream;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -154,22 +152,19 @@ async fn process_directory(
     .chain(ext.into_iter())
     .collect::<HashSet<_>>();
 
-    let entries: Vec<_> = ReadDirStream::new(fs::read_dir(in_dir).await?)
-        .filter_map(|entry| async {
-            match entry {
-                Ok(e)
-                    if e.path()
-                        .extension()
-                        .map_or(false, |ext| valid_extensions.contains(ext))
-                        && e.file_type().await.ok()?.is_file() =>
-                {
-                    Some(e.path())
-                }
-                _ => None,
-            }
-        })
-        .collect()
-        .await;
+    let mut read_dir = fs::read_dir(in_dir).await?;
+    let mut entries = Vec::new();
+
+    while let Some(entry) = read_dir.next_entry().await? {
+        if entry
+            .path()
+            .extension()
+            .map_or(false, |ext| valid_extensions.contains(ext))
+            && entry.file_type().await?.is_file()
+        {
+            entries.push(entry.path());
+        }
+    }
 
     let semaphore = Arc::new(Semaphore::new(transfers));
     let mut tasks: Vec<JoinHandle<Result<()>>> = Vec::new();
