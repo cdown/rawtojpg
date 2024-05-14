@@ -70,14 +70,12 @@ async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
 
     let raw_buf = unsafe { MmapOptions::new().map(raw_fd).unwrap() };
 
-    let base_length = raw_buf.len();
     unsafe {
         madvise_aligned(
             raw_buf.as_ptr() as *mut _,
-            base_length,
+            raw_buf.len(),
             MmapAdvise::MADV_RANDOM,
-        )
-        .unwrap();
+        )?;
     }
 
     Ok(raw_buf)
@@ -120,9 +118,10 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
         PosixFadviseAdvice::POSIX_FADV_WILLNEED,
     )
     .unwrap();
+
     unsafe {
         let em_jpeg_ptr = raw_buf.as_ptr().add(jpeg_offset);
-        madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED).unwrap();
+        madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED)?;
     }
 
     Ok(&raw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
