@@ -109,26 +109,21 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
     Ok(&raw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
 }
 
-async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<()> {
-    let mut output_file = out_dir.join(filename);
-    output_file.set_extension("jpg");
-    println!("{filename}");
-
+async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
     let mut out_file = File::create(&output_file).await?;
     out_file.write_all(jpeg_buf).await?;
     Ok(())
 }
 
-async fn process_file(entry_path: &Path, out_dir: &Path) -> Result<()> {
-    let filename = entry_path
-        .file_name()
-        .and_then(|e| e.to_str())
-        .context("Invalid filename")?;
+async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
     let in_file = File::open(entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
     let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
-    write_jpeg(out_dir, filename, jpeg_buf).await?;
+    let mut output_file = out_dir.join(relative_path);
+    output_file.set_extension("jpg");
+    println!("{}", output_file.display());
+    write_jpeg(&output_file, jpeg_buf).await?;
     Ok(())
 }
 
@@ -152,32 +147,46 @@ async fn process_directory(
     .chain(ext.into_iter())
     .collect::<HashSet<_>>();
 
-    let mut read_dir = fs::read_dir(in_dir).await?;
     let mut entries = Vec::new();
+    let mut dir_queue = vec![in_dir.to_path_buf()];
 
-    while let Some(entry) = read_dir.next_entry().await? {
-        let path = entry.path();
-        if path
-            .extension()
-            .map_or(false, |ext| valid_extensions.contains(ext))
-            && entry.file_type().await?.is_file()
-        {
-            entries.push(path);
+    while let Some(current_dir) = dir_queue.pop() {
+        let mut read_dir = fs::read_dir(&current_dir).await?;
+        let mut found_raw = false;
+
+        while let Some(entry) = read_dir.next_entry().await? {
+            let path = entry.path();
+            if entry.file_type().await?.is_dir() {
+                dir_queue.push(path);
+            } else if path
+                .extension()
+                .map_or(false, |ext| valid_extensions.contains(ext))
+            {
+                found_raw = true;
+                entries.push(path);
+            }
+        }
+
+        if found_raw {
+            let relative_dir = current_dir.strip_prefix(in_dir)?;
+            let output_subdir = out_dir.join(relative_dir);
+            fs::create_dir_all(&output_subdir).await?;
         }
     }
 
     let semaphore = Arc::new(Semaphore::new(transfers));
     let mut tasks: Vec<JoinHandle<Result<()>>> = Vec::new();
 
-    for path in entries {
+    for in_path in entries {
         let semaphore = semaphore.clone();
         let out_dir = out_dir.to_path_buf();
+        let relative_path = in_path.strip_prefix(in_dir)?.to_path_buf();
         let task = tokio::spawn(async move {
             let permit = semaphore.acquire_owned().await?;
-            let result = process_file(&path, &out_dir).await;
+            let result = process_file(&in_path, &out_dir, &relative_path).await;
             drop(permit);
             if let Err(e) = &result {
-                eprintln!("Error processing file {}: {:?}", path.display(), e);
+                eprintln!("Error processing file {}: {:?}", in_path.display(), e);
             }
             result
         });
