@@ -6,14 +6,15 @@ output_dir="${OUTPUT_DIR:-/home/cdown/testdir}"
 runs=50
 warmups=5
 
+nice_cmd=(sudo nice -n -20 ionice -c 1 -n 0 sudo -u "${USER?}")
 prepare_cmd="sh -c 'rm -rf $output_dir; mkdir $output_dir' && sudo sh -c 'sync && echo 3 > /proc/sys/vm/drop_caches'"
 
 cargo build --profile profiling
 
 if (( PROFILE )); then
-    samply record "$executable" "$input_dir" "$output_dir" "$@"
+    "${nice_cmd[@]}" samply record "$executable" "$input_dir" "$output_dir" "$@"
 else
-    hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs "$runs" -N "$executable $input_dir $output_dir $*"
+    "${nice_cmd[@]}" hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs "$runs" -N "$executable $input_dir $output_dir $*"
 fi
 
 # Validate the files all look fine
