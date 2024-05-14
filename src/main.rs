@@ -6,6 +6,7 @@ use nix::fcntl::posix_fadvise;
 use nix::fcntl::PosixFadviseAdvice;
 use nix::sys::mman::{madvise, MmapAdvise};
 use nix::unistd::{sysconf, SysconfVar};
+use once_cell::sync::OnceCell;
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::io::AsRawFd;
@@ -46,7 +47,9 @@ const fn is_jpeg_soi(buf: &[u8]) -> bool {
 }
 
 unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
-    let page_size: usize = sysconf(SysconfVar::PAGE_SIZE).unwrap().unwrap() as usize;
+    static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
+    let page_size =
+        *PAGE_SIZE.get_or_init(|| sysconf(SysconfVar::PAGE_SIZE).unwrap().unwrap() as usize);
 
     let page_aligned_start = (addr as usize) & !(page_size - 1);
 
