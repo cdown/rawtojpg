@@ -1,8 +1,8 @@
 #!/bin/bash -e
 
 executable="target/release/rawtojpg"
-input_dir="/mnt/sdcard/DCIM/101MSDCF"
-output_dir="/home/cdown/testdir"
+input_dir="${INPUT_DIR:-/mnt/sdcard/DCIM/101MSDCF}"
+output_dir="${OUTPUT_DIR:-/home/cdown/testdir}"
 runs=50
 warmups=5
 
