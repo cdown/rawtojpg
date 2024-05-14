@@ -119,12 +119,12 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
     Ok(())
 }
 
-async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
+async fn process_file(entry_path: &Path, out_dir: &Path) -> Result<()> {
     let filename = entry_path
         .file_name()
         .and_then(|e| e.to_str())
         .context("Invalid filename")?;
-    let in_file = File::open(&entry_path).await?;
+    let in_file = File::open(entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
     let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
@@ -156,13 +156,13 @@ async fn process_directory(
     let mut entries = Vec::new();
 
     while let Some(entry) = read_dir.next_entry().await? {
-        if entry
-            .path()
+        let path = entry.path();
+        if path
             .extension()
             .map_or(false, |ext| valid_extensions.contains(ext))
             && entry.file_type().await?.is_file()
         {
-            entries.push(entry.path());
+            entries.push(path);
         }
     }
 
@@ -174,8 +174,11 @@ async fn process_directory(
         let out_dir = out_dir.to_path_buf();
         let task = tokio::spawn(async move {
             let permit = semaphore.acquire_owned().await?;
-            let result = process_file(path, &out_dir).await;
+            let result = process_file(&path, &out_dir).await;
             drop(permit);
+            if let Err(e) = &result {
+                eprintln!("Error processing file {}: {:?}", path.display(), e);
+            }
             result
         });
         tasks.push(task);
