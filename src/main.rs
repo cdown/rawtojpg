@@ -82,25 +82,14 @@ async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
 }
 
 fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
-    let exif = rexif::parse_buffer(raw_buf)?;
-    let jpeg_offset_tag = 0x0201; // JPEGInterchangeFormat
-    let jpeg_length_tag = 0x0202; // JPEGInterchangeFormatLength
-    let mut jpeg_offset = None;
-    let mut jpeg_sz = None;
+    let rule = quickexif::describe_rule!(tiff {
+        0x0201 / jpeg_offset
+        0x0202 / jpeg_sz
+    });
+    let exif = quickexif::parse(raw_buf, &rule)?;
 
-    for entry in &exif.entries {
-        if entry.ifd.tag == jpeg_offset_tag {
-            jpeg_offset = Some(entry.value.to_i64(0).context("Invalid EXIF type")? as usize);
-        } else if entry.ifd.tag == jpeg_length_tag {
-            jpeg_sz = Some(entry.value.to_i64(0).context("Invalid EXIF type")? as usize);
-        }
-        if jpeg_offset.is_some() && jpeg_sz.is_some() {
-            break;
-        }
-    }
-
-    let jpeg_offset = jpeg_offset.context("Cannot find embedded JPEG")?;
-    let jpeg_sz = jpeg_sz.context("Cannot find embedded JPEG")?;
+    let jpeg_offset = exif.u32("jpeg_offset")? as usize;
+    let jpeg_sz = exif.u32("jpeg_sz")? as usize;
 
     ensure!(
         (jpeg_offset + jpeg_sz) <= raw_buf.len(),
