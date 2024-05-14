@@ -48,8 +48,13 @@ const fn is_jpeg_soi(buf: &[u8]) -> bool {
 
 unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
     static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
-    let page_size =
-        *PAGE_SIZE.get_or_init(|| sysconf(SysconfVar::PAGE_SIZE).unwrap().unwrap() as usize);
+
+    let page_size = *PAGE_SIZE.get_or_try_init(|| {
+        sysconf(SysconfVar::PAGE_SIZE)
+            .context("Failed to get page size")?
+            .context("PAGE_SIZE is not available")
+            .map(|v| v as usize)
+    })?;
 
     let page_aligned_start = (addr as usize) & !(page_size - 1);
 
