@@ -11,6 +11,7 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::fs::File;
@@ -39,6 +40,9 @@ struct Args {
     #[arg(short, long)]
     extension: Option<OsString>,
 }
+
+// Global variable to track if any error occurred
+static ERROR_OCCURRED: AtomicBool = AtomicBool::new(false);
 
 unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
     static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
@@ -119,12 +123,12 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
     Ok(())
 }
 
-async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
+async fn process_file(entry_path: &Path, out_dir: &Path) -> Result<()> {
     let filename = entry_path
         .file_name()
         .and_then(|e| e.to_str())
         .context("Invalid filename")?;
-    let in_file = File::open(&entry_path).await?;
+    let in_file = File::open(entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
     let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
@@ -156,13 +160,23 @@ async fn process_directory(
     let mut entries = Vec::new();
 
     while let Some(entry) = read_dir.next_entry().await? {
-        if entry
-            .path()
+        let path = entry.path();
+        if !path
             .extension()
             .map_or(false, |ext| valid_extensions.contains(ext))
-            && entry.file_type().await?.is_file()
         {
-            entries.push(entry.path());
+            continue;
+        }
+
+        match entry.file_type().await {
+            Ok(file_type) if file_type.is_file() => {
+                entries.push(path);
+            }
+            Err(e) => {
+                ERROR_OCCURRED.store(true, Ordering::Relaxed);
+                eprintln!("Error checking file type for {}: {:?}", path.display(), e);
+            }
+            _ => continue,
         }
     }
 
@@ -174,8 +188,12 @@ async fn process_directory(
         let out_dir = out_dir.to_path_buf();
         let task = tokio::spawn(async move {
             let permit = semaphore.acquire_owned().await?;
-            let result = process_file(path, &out_dir).await;
+            let result = process_file(&path, &out_dir).await;
             drop(permit);
+            if let Err(e) = &result {
+                ERROR_OCCURRED.store(true, Ordering::Relaxed);
+                eprintln!("Error processing file {}: {:?}", path.display(), e);
+            }
             result
         });
         tasks.push(task);
@@ -198,6 +216,10 @@ async fn main() -> Result<()> {
 
     fs::create_dir_all(&output_dir).await?;
     process_directory(&args.input_dir, output_dir, args.extension, args.transfers).await?;
+
+    if ERROR_OCCURRED.load(Ordering::Relaxed) {
+        std::process::exit(1);
+    }
 
     Ok(())
 }
