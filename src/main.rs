@@ -58,17 +58,16 @@ unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> R
 
     let aligned_length = page_aligned_end - page_aligned_start;
     let aligned_addr = page_aligned_start as *mut _;
-    let aligned_nonnull = NonNull::new(aligned_addr)
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert aligned address to NonNull"))?;
+    let aligned_nonnull = NonNull::new(aligned_addr).context("Aligned address was NULL")?;
 
     Ok(madvise(aligned_nonnull, aligned_length, advice)?)
 }
 
 async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
-    posix_fadvise(raw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM).unwrap();
+    posix_fadvise(raw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM)?;
 
-    let raw_buf = unsafe { MmapOptions::new().map(raw_fd).unwrap() };
+    let raw_buf = unsafe { MmapOptions::new().map(raw_fd)? };
 
     unsafe {
         madvise_aligned(
@@ -90,9 +89,9 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
 
     for entry in &exif.entries {
         if entry.ifd.tag == jpeg_offset_tag {
-            jpeg_offset = Some(entry.value.to_i64(0).unwrap() as usize);
+            jpeg_offset = Some(entry.value.to_i64(0).context("Invalid EXIF type")? as usize);
         } else if entry.ifd.tag == jpeg_length_tag {
-            jpeg_sz = Some(entry.value.to_i64(0).unwrap() as usize);
+            jpeg_sz = Some(entry.value.to_i64(0).context("Invalid EXIF type")? as usize);
         }
         if jpeg_offset.is_some() && jpeg_sz.is_some() {
             break;
@@ -116,8 +115,7 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
         jpeg_offset as i64,
         jpeg_sz as i64,
         PosixFadviseAdvice::POSIX_FADV_WILLNEED,
-    )
-    .unwrap();
+    )?;
 
     unsafe {
         let em_jpeg_ptr = raw_buf.as_ptr().add(jpeg_offset);
@@ -138,7 +136,10 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
 }
 
 async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
-    let filename = entry_path.file_name().unwrap().to_str().unwrap();
+    let filename = entry_path
+        .file_name()
+        .and_then(|e| e.to_str())
+        .context("Invalid filename")?;
     let in_file = File::open(&entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
@@ -174,7 +175,7 @@ async fn process_directory(
                     if e.path()
                         .extension()
                         .map_or(false, |ext| valid_extensions.contains(ext))
-                        && e.metadata().await.unwrap().is_file() =>
+                        && e.metadata().await.ok()?.is_file() =>
                 {
                     Some(e.path())
                 }
@@ -191,7 +192,7 @@ async fn process_directory(
         let semaphore = semaphore.clone();
         let out_dir = out_dir.to_path_buf();
         let task = tokio::spawn(async move {
-            let permit = semaphore.acquire_owned().await.unwrap();
+            let permit = semaphore.acquire_owned().await?;
             let result = process_file(path, &out_dir).await;
             drop(permit);
             result
