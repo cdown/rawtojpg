@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-executable="target/release/rawtojpg"
+executable="target/profiling/rawtojpg"
 input_dir="${INPUT_DIR:-/mnt/sdcard/DCIM/101MSDCF}"
 output_dir="${OUTPUT_DIR:-/home/cdown/testdir}"
 runs=50
@@ -8,8 +8,13 @@ warmups=5
 
 prepare_cmd="sh -c 'rm -rf $output_dir; mkdir $output_dir' && sudo sh -c 'sync && echo 3 > /proc/sys/vm/drop_caches'"
 
-cargo build --release
-hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs "$runs" -N "$executable $input_dir $output_dir $*"
+cargo build --profile profiling
+
+if (( PROFILE )); then
+    samply record "$executable" "$input_dir" "$output_dir" "$@"
+else
+    hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs "$runs" -N "$executable $input_dir $output_dir $*"
+fi
 
 # Validate the files all look fine
 in=( "$input_dir"/*.ARW )
