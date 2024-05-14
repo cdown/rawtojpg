@@ -42,10 +42,6 @@ struct Args {
     extension: Option<OsString>,
 }
 
-const fn is_jpeg_soi(buf: &[u8]) -> bool {
-    buf[0] == 0xff && buf[1] == 0xd8
-}
-
 unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
     static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
 
@@ -109,10 +105,6 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
     ensure!(
         (jpeg_offset + jpeg_sz) <= raw_buf.len(),
         "JPEG data exceeds file size"
-    );
-    ensure!(
-        is_jpeg_soi(&raw_buf[jpeg_offset..]),
-        "Missing JPEG SOI marker"
     );
 
     posix_fadvise(
