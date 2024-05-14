@@ -15,5 +15,12 @@ hyperfine --prepare "$prepare_cmd" --warmup "$warmups" --runs "$runs" -N "$execu
 in=( "$input_dir"/*.ARW )
 out=( "$output_dir"/*.jpg )
 
-(( "${#in[@]}" > 0 )) && (( "${#in[@]}" == "${#out[@]}" ))
-! file "${out[@]}" | grep -vq 'JPEG image data'
+if (( "${#in[@]}" == 0 )) || (( "${#in[@]}" != "${#out[@]}" )); then
+    printf 'Wrong number of files: %d\n' "${#out[@]}" >&2
+    exit 1
+fi
+
+if file "${out[@]}" | grep -vq 'JPEG image data'; then
+    printf 'Bad image\n' >&2
+    exit 1
+fi
