@@ -180,7 +180,7 @@ async fn process_directory(
                     if e.path()
                         .extension()
                         .map_or(false, |ext| valid_extensions.contains(ext))
-                        && e.metadata().await.ok()?.is_file() =>
+                        && e.file_type().await.ok()?.is_file() =>
                 {
                     Some(e.path())
                 }
