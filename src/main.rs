@@ -138,10 +138,7 @@ async fn write_jpeg(out_dir: &Path, filename: &str, jpeg_buf: &[u8]) -> Result<(
 }
 
 async fn process_file(entry_path: PathBuf, out_dir: &Path) -> Result<()> {
-    let filename = entry_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap();
+    let filename = entry_path.file_name().unwrap().to_str().unwrap();
     let in_file = File::open(&entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
@@ -173,30 +170,36 @@ async fn process_directory(
         valid_extensions.insert(ext);
     }
 
-    let ent = fs::read_dir(in_dir).await?;
-    let mut ent_stream = ReadDirStream::new(ent);
-    let semaphore = Arc::new(Semaphore::new(transfers));
+    let entries: Vec<_> = ReadDirStream::new(fs::read_dir(in_dir).await?)
+        .filter_map(|entry| async {
+            match entry {
+                Ok(e)
+                    if e.path()
+                        .extension()
+                        .map_or(false, |ext| valid_extensions.contains(ext))
+                        && e.metadata().await.unwrap().is_file() =>
+                {
+                    Some(e.path())
+                }
+                _ => None,
+            }
+        })
+        .collect()
+        .await;
 
+    let semaphore = Arc::new(Semaphore::new(transfers));
     let mut tasks: Vec<JoinHandle<Result<()>>> = Vec::new();
 
-    while let Some(entry) = ent_stream.next().await {
-        match entry {
-            Ok(e)
-                if e.path()
-                    .extension()
-                    .map_or(false, |ext| valid_extensions.contains(ext))
-                    && e.metadata().await.unwrap().is_file() =>
-            {
-                let permit = semaphore.clone().acquire_owned().await.unwrap();
-                let task = tokio::spawn(async move {
-                    let result = process_file(e.path(), out_dir).await;
-                    drop(permit);
-                    result
-                });
-                tasks.push(task);
-            }
-            _ => continue,
-        }
+    for path in entries {
+        let semaphore = semaphore.clone();
+        let out_dir = out_dir.to_path_buf();
+        let task = tokio::spawn(async move {
+            let permit = semaphore.acquire_owned().await.unwrap();
+            let result = process_file(path, &out_dir).await;
+            drop(permit);
+            result
+        });
+        tasks.push(task);
     }
 
     for task in tasks {
