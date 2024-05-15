@@ -6,7 +6,7 @@ use nix::sys::mman::{madvise, MmapAdvise};
 use nix::unistd::{sysconf, SysconfVar};
 use once_cell::sync::OnceCell;
 use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -136,12 +136,7 @@ async fn process_directory(
         "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f",
     ]
     .iter()
-    .flat_map(|&ext| {
-        [
-            OsStr::new(ext).to_owned(),
-            OsStr::new(&ext.to_uppercase()).to_owned(),
-        ]
-    })
+    .flat_map(|&ext| [OsString::from(ext), OsString::from(&ext.to_uppercase())])
     .chain(ext.into_iter())
     .collect::<HashSet<_>>();
 
