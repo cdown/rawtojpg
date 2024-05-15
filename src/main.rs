@@ -38,6 +38,20 @@ struct Args {
     extension: Option<OsString>,
 }
 
+fn align_down(addr: *mut u8, alignment: usize) -> *mut u8 {
+    let offset = addr.align_offset(alignment);
+    if offset == 0 {
+        addr
+    } else {
+        unsafe { addr.add(offset).sub(alignment) }
+    }
+}
+
+fn align_up(addr: *mut u8, alignment: usize) -> *mut u8 {
+    let offset = addr.align_offset(alignment);
+    unsafe { addr.add(offset) }
+}
+
 unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
     static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
 
@@ -48,16 +62,12 @@ unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> R
             .map(|v| v as usize)
     })?;
 
-    let page_aligned_start = (addr as usize) & !(page_size - 1);
+    let start = align_down(addr, page_size);
+    let end = align_up(addr.add(length), page_size);
+    let length = end.offset_from(start);
+    let start = NonNull::new(start).context("Aligned address was NULL")?;
 
-    let original_end = addr as usize + length;
-    let page_aligned_end = (original_end + page_size - 1) & !(page_size - 1);
-
-    let aligned_length = page_aligned_end - page_aligned_start;
-    let aligned_addr = page_aligned_start as *mut _;
-    let aligned_nonnull = NonNull::new(aligned_addr).context("Aligned address was NULL")?;
-
-    Ok(madvise(aligned_nonnull, aligned_length, advice)?)
+    Ok(madvise(start.cast(), length.try_into()?, advice)?)
 }
 
 async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
