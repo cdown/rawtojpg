@@ -117,7 +117,7 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
 }
 
 async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
-    let mut out_file = File::create(&output_file).await?;
+    let mut out_file = File::create(output_file).await?;
     out_file.write_all(jpeg_buf).await?;
     Ok(())
 }
