@@ -56,8 +56,7 @@ unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> R
     static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
 
     let page_size = *PAGE_SIZE.get_or_try_init(|| {
-        sysconf(SysconfVar::PAGE_SIZE)
-            .context("Failed to get page size")?
+        sysconf(SysconfVar::PAGE_SIZE)?
             .context("PAGE_SIZE is not available")
             .map(|v| v as usize)
     })?;
