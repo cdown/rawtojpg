@@ -1,15 +1,11 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Result};
 use clap::Parser;
-use memmap2::{Mmap, MmapOptions};
+use memmap2::{Advice, Mmap, MmapOptions};
 use nix::fcntl::{posix_fadvise, PosixFadviseAdvice};
-use nix::sys::mman::{madvise, MmapAdvise};
-use nix::unistd::{sysconf, SysconfVar};
-use once_cell::sync::OnceCell;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::ptr::NonNull;
 use std::sync::Arc;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
@@ -38,55 +34,17 @@ struct Args {
     extension: Option<OsString>,
 }
 
-fn align_down(addr: *mut u8, alignment: usize) -> *mut u8 {
-    let offset = addr.align_offset(alignment);
-    if offset == 0 {
-        addr
-    } else {
-        unsafe { addr.add(offset).sub(alignment) }
-    }
-}
-
-fn align_up(addr: *mut u8, alignment: usize) -> *mut u8 {
-    let offset = addr.align_offset(alignment);
-    unsafe { addr.add(offset) }
-}
-
-unsafe fn madvise_aligned(addr: *mut u8, length: usize, advice: MmapAdvise) -> Result<()> {
-    static PAGE_SIZE: OnceCell<usize> = OnceCell::new();
-
-    let page_size = *PAGE_SIZE.get_or_try_init(|| {
-        sysconf(SysconfVar::PAGE_SIZE)?
-            .context("PAGE_SIZE is not available")
-            .map(|v| v as usize)
-    })?;
-
-    let start = align_down(addr, page_size);
-    let end = align_up(addr.add(length), page_size);
-    let length = end.offset_from(start);
-    let start = NonNull::new(start).context("Aligned address was NULL")?;
-
-    Ok(madvise(start.cast(), length.try_into()?, advice)?)
-}
-
 async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
     posix_fadvise(raw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM)?;
 
     let raw_buf = unsafe { MmapOptions::new().map(raw_fd)? };
-
-    unsafe {
-        madvise_aligned(
-            raw_buf.as_ptr() as *mut _,
-            raw_buf.len(),
-            MmapAdvise::MADV_RANDOM,
-        )?;
-    }
+    raw_buf.advise(Advice::Random)?;
 
     Ok(raw_buf)
 }
 
-fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
+fn extract_jpeg(raw_fd: i32, raw_buf: &Mmap) -> Result<&[u8]> {
     let rule = quickexif::describe_rule!(tiff {
         0x0201 / jpeg_offset
         0x0202 / jpeg_sz
@@ -108,10 +66,8 @@ fn extract_jpeg(raw_fd: i32, raw_buf: &[u8]) -> Result<&[u8]> {
         PosixFadviseAdvice::POSIX_FADV_WILLNEED,
     )?;
 
-    unsafe {
-        let em_jpeg_ptr = raw_buf.as_ptr().add(jpeg_offset);
-        madvise_aligned(em_jpeg_ptr as *mut _, jpeg_sz, MmapAdvise::MADV_WILLNEED)?;
-    }
+    raw_buf.advise_range(Advice::WillNeed, jpeg_offset, jpeg_sz)?;
+    raw_buf.advise_range(Advice::PopulateRead, jpeg_offset, jpeg_sz)?;
 
     Ok(&raw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
 }
