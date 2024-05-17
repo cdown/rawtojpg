@@ -145,7 +145,7 @@ async fn process_directory(
         "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f",
     ]
     .iter()
-    .flat_map(|&ext| [OsString::from(ext), OsString::from(&ext.to_uppercase())])
+    .flat_map(|&ext| [OsString::from(ext), OsString::from(ext.to_uppercase())])
     .chain(ext.into_iter())
     .collect::<HashSet<_>>();
 
