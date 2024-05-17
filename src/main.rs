@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use clap::Parser;
-use memmap2::{Advice, Mmap, MmapOptions};
+use memmap2::{Advice, Mmap};
 use nix::fcntl::{posix_fadvise, PosixFadviseAdvice};
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -38,7 +38,7 @@ async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
     posix_fadvise(raw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM)?;
 
-    let raw_buf = unsafe { MmapOptions::new().map(raw_fd)? };
+    let raw_buf = unsafe { Mmap::map(raw_fd)? };
     raw_buf.advise(Advice::Random)?;
 
     Ok(raw_buf)
