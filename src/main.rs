@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -133,7 +132,7 @@ async fn process_directory(
     }
 
     let semaphore = Arc::new(Semaphore::new(transfers));
-    let mut tasks: Vec<JoinHandle<Result<()>>> = Vec::new();
+    let mut tasks = Vec::new();
 
     for in_path in entries {
         let semaphore = semaphore.clone();
