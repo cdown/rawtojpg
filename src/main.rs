@@ -105,6 +105,10 @@ fn find_largest_embedded_jpeg(raw_buf: &Mmap) -> Result<EmbeddedJpegInfo> {
                 _ => {}
             }
 
+            if cur_offset.is_some() && cur_length.is_some() {
+                break;
+            }
+
             entries_cursor = &entries_cursor[IFD_ENTRY_SIZE..];
         }
 
