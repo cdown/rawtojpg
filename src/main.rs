@@ -43,32 +43,107 @@ async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     Ok(raw_buf)
 }
 
-fn extract_jpeg(raw_fd: i32, raw_buf: &Mmap) -> Result<&[u8]> {
-    let rule = quickexif::describe_rule!(tiff {
-        0x0201 / jpeg_offset
-        0x0202 / jpeg_sz
-    });
-    let exif = quickexif::parse(raw_buf, &rule)?;
+struct EmbeddedJpegInfo {
+    offset: usize,
+    length: usize,
+}
 
-    let jpeg_offset = exif.u32("jpeg_offset")? as usize;
-    let jpeg_sz = exif.u32("jpeg_sz")? as usize;
+fn read_u16(cursor: &[u8], is_le: bool) -> u16 {
+    if is_le {
+        u16::from_le_bytes(cursor.try_into().unwrap())
+    } else {
+        u16::from_be_bytes(cursor.try_into().unwrap())
+    }
+}
+
+fn read_u32(cursor: &[u8], is_le: bool) -> u32 {
+    if is_le {
+        u32::from_le_bytes(cursor.try_into().unwrap())
+    } else {
+        u32::from_be_bytes(cursor.try_into().unwrap())
+    }
+}
+
+/// We do this by hand because EXIF libraries don't fit requirements:
+///
+/// - kamadak-exif: Reads into a big Vec<u8>, which is huge for our big RAW.
+/// - quickexif: Cannot iterate over IFDs.
+fn find_largest_embedded_jpeg(raw_buf: &Mmap) -> Result<EmbeddedJpegInfo> {
+    const IFD_ENTRY_SIZE: usize = 12;
+    const TIFF_MAGIC_LE: &[u8] = b"II*\0";
+    const TIFF_MAGIC_BE: &[u8] = b"MM\0*";
 
     ensure!(
-        (jpeg_offset + jpeg_sz) <= raw_buf.len(),
+        &raw_buf[0..4] == TIFF_MAGIC_LE || &raw_buf[0..4] == TIFF_MAGIC_BE,
+        "Not a valid TIFF file"
+    );
+
+    let is_le = &raw_buf[0..4] == TIFF_MAGIC_LE;
+
+    let mut next_ifd_offset = read_u32(&raw_buf[4..8], is_le) as usize;
+    let mut largest_jpeg = EmbeddedJpegInfo {
+        offset: 0,
+        length: 0,
+    };
+
+    while next_ifd_offset != 0 {
+        let cursor = &raw_buf[next_ifd_offset..];
+        let num_entries = read_u16(&cursor[..2], is_le) as usize;
+        let mut entries_cursor = &cursor[2..];
+
+        let mut cur_offset: Option<usize> = None;
+        let mut cur_length: Option<usize> = None;
+
+        for _ in 0..num_entries {
+            let tag = read_u16(&entries_cursor[..2], is_le);
+
+            match tag {
+                // JPEGInterchangeFormat
+                0x201 => cur_offset = Some(read_u32(&entries_cursor[8..12], is_le) as usize),
+                // JPEGInterchangeFormatLength
+                0x202 => cur_length = Some(read_u32(&entries_cursor[8..12], is_le) as usize),
+                _ => {}
+            }
+
+            entries_cursor = &entries_cursor[IFD_ENTRY_SIZE..];
+        }
+
+        if let (Some(offset), Some(length)) = (cur_offset, cur_length) {
+            if length > largest_jpeg.length {
+                largest_jpeg = EmbeddedJpegInfo { offset, length };
+            }
+        }
+
+        next_ifd_offset =
+            read_u32(&cursor[2 + num_entries * IFD_ENTRY_SIZE..][..4], is_le) as usize;
+    }
+
+    ensure!(
+        largest_jpeg.offset != 0 && largest_jpeg.length != 0,
+        "No JPEG data found"
+    );
+    ensure!(
+        (largest_jpeg.offset + largest_jpeg.length) <= raw_buf.len(),
         "JPEG data exceeds file size"
     );
 
+    Ok(largest_jpeg)
+}
+
+fn extract_jpeg(raw_fd: i32, raw_buf: &Mmap) -> Result<&[u8]> {
+    let jpeg = find_largest_embedded_jpeg(raw_buf)?;
+
     posix_fadvise(
         raw_fd,
-        jpeg_offset as i64,
-        jpeg_sz as i64,
+        jpeg.offset as i64,
+        jpeg.length as i64,
         PosixFadviseAdvice::POSIX_FADV_WILLNEED,
     )?;
 
-    raw_buf.advise_range(Advice::WillNeed, jpeg_offset, jpeg_sz)?;
-    raw_buf.advise_range(Advice::PopulateRead, jpeg_offset, jpeg_sz)?;
+    raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
+    raw_buf.advise_range(Advice::PopulateRead, jpeg.offset, jpeg.length)?;
 
-    Ok(&raw_buf[jpeg_offset..jpeg_offset + jpeg_sz])
+    Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
 
 async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
