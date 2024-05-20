@@ -80,7 +80,7 @@ fn find_largest_embedded_jpeg(raw_buf: &Mmap) -> Result<EmbeddedJpegInfo> {
 
     let is_le = &raw_buf[0..4] == TIFF_MAGIC_LE;
 
-    let mut next_ifd_offset = read_u32(&raw_buf[4..8], is_le) as usize;
+    let mut next_ifd_offset = read_u32(&raw_buf[4..8], is_le).try_into()?;
     let mut largest_jpeg = EmbeddedJpegInfo {
         offset: 0,
         length: 0,
@@ -88,7 +88,7 @@ fn find_largest_embedded_jpeg(raw_buf: &Mmap) -> Result<EmbeddedJpegInfo> {
 
     while next_ifd_offset != 0 {
         let cursor = &raw_buf[next_ifd_offset..];
-        let num_entries = read_u16(&cursor[..2], is_le) as usize;
+        let num_entries = read_u16(&cursor[..2], is_le).into();
         let mut entries_cursor = &cursor[2..];
 
         let mut cur_offset: Option<usize> = None;
@@ -99,9 +99,9 @@ fn find_largest_embedded_jpeg(raw_buf: &Mmap) -> Result<EmbeddedJpegInfo> {
 
             match tag {
                 // JPEGInterchangeFormat
-                0x201 => cur_offset = Some(read_u32(&entries_cursor[8..12], is_le) as usize),
+                0x201 => cur_offset = Some(read_u32(&entries_cursor[8..12], is_le).try_into()?),
                 // JPEGInterchangeFormatLength
-                0x202 => cur_length = Some(read_u32(&entries_cursor[8..12], is_le) as usize),
+                0x202 => cur_length = Some(read_u32(&entries_cursor[8..12], is_le).try_into()?),
                 _ => {}
             }
 
@@ -119,7 +119,7 @@ fn find_largest_embedded_jpeg(raw_buf: &Mmap) -> Result<EmbeddedJpegInfo> {
         }
 
         next_ifd_offset =
-            read_u32(&cursor[2 + num_entries * IFD_ENTRY_SIZE..][..4], is_le) as usize;
+            read_u32(&cursor[2 + num_entries * IFD_ENTRY_SIZE..][..4], is_le).try_into()?;
     }
 
     ensure!(
