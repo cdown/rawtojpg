@@ -105,14 +105,11 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
                 _ => {}
             }
 
-            if cur_offset.is_some() && cur_length.is_some() {
+            if let (Some(offset), Some(length)) = (cur_offset, cur_length) {
+                if length > largest_jpeg.length {
+                    largest_jpeg = EmbeddedJpegInfo { offset, length };
+                }
                 break;
-            }
-        }
-
-        if let (Some(offset), Some(length)) = (cur_offset, cur_length) {
-            if length > largest_jpeg.length {
-                largest_jpeg = EmbeddedJpegInfo { offset, length };
             }
         }
 
