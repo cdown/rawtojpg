@@ -86,27 +86,28 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     while next_ifd_offset != 0 {
         let cursor = &raw_buf[next_ifd_offset..];
         let num_entries = read_u16(&cursor[..2]).into();
-        let mut entries_cursor = &cursor[2..];
+        let entries_cursor = &cursor[2..];
 
         let mut cur_offset = None;
         let mut cur_length = None;
 
-        for _ in 0..num_entries {
-            let tag = read_u16(&entries_cursor[..2]);
+        for entry in entries_cursor
+            .chunks_exact(IFD_ENTRY_SIZE)
+            .take(num_entries)
+        {
+            let tag = read_u16(&entry[..2]);
 
             match tag {
                 // JPEGInterchangeFormat
-                0x201 => cur_offset = Some(read_u32(&entries_cursor[8..12]).try_into()?),
+                0x201 => cur_offset = Some(read_u32(&entry[8..12]).try_into()?),
                 // JPEGInterchangeFormatLength
-                0x202 => cur_length = Some(read_u32(&entries_cursor[8..12]).try_into()?),
+                0x202 => cur_length = Some(read_u32(&entry[8..12]).try_into()?),
                 _ => {}
             }
 
             if cur_offset.is_some() && cur_length.is_some() {
                 break;
             }
-
-            entries_cursor = &entries_cursor[IFD_ENTRY_SIZE..];
         }
 
         if let (Some(offset), Some(length)) = (cur_offset, cur_length) {
