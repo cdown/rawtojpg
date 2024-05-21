@@ -44,6 +44,7 @@ async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     Ok(raw_buf)
 }
 
+#[derive(Default, Eq, PartialEq)]
 struct EmbeddedJpegInfo {
     offset: usize,
     length: usize,
@@ -80,10 +81,7 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     };
 
     let mut next_ifd_offset = read_u32(&raw_buf[4..8]).try_into()?;
-    let mut largest_jpeg = EmbeddedJpegInfo {
-        offset: 0,
-        length: 0,
-    };
+    let mut largest_jpeg = EmbeddedJpegInfo::default();
 
     while next_ifd_offset != 0 {
         let cursor = &raw_buf[next_ifd_offset..];
@@ -117,7 +115,7 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     }
 
     ensure!(
-        largest_jpeg.offset != 0 && largest_jpeg.length != 0,
+        largest_jpeg != EmbeddedJpegInfo::default(),
         "No JPEG data found"
     );
     ensure!(
