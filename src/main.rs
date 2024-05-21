@@ -61,12 +61,11 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     const JPEG_TAG: u16 = 0x201;
     const JPEG_LENGTH_TAG: u16 = 0x202;
 
+    let is_le = &raw_buf[0..4] == TIFF_MAGIC_LE;
     ensure!(
-        &raw_buf[0..4] == TIFF_MAGIC_LE || &raw_buf[0..4] == TIFF_MAGIC_BE,
+        is_le || &raw_buf[0..4] == TIFF_MAGIC_BE,
         "Not a valid TIFF file"
     );
-
-    let is_le = &raw_buf[0..4] == TIFF_MAGIC_LE;
 
     let read_u16 = if is_le {
         LittleEndian::read_u16
