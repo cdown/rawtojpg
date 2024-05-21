@@ -57,6 +57,8 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     const IFD_ENTRY_SIZE: usize = 12;
     const TIFF_MAGIC_LE: &[u8] = b"II*\0";
     const TIFF_MAGIC_BE: &[u8] = b"MM\0*";
+    const JPEG_TAG: u16 = 0x201;
+    const JPEG_LENGTH_TAG: u16 = 0x202;
 
     ensure!(
         &raw_buf[0..4] == TIFF_MAGIC_LE || &raw_buf[0..4] == TIFF_MAGIC_BE,
@@ -98,10 +100,8 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
             let tag = read_u16(&entry[..2]);
 
             match tag {
-                // JPEGInterchangeFormat
-                0x201 => cur_offset = Some(read_u32(&entry[8..12]).try_into()?),
-                // JPEGInterchangeFormatLength
-                0x202 => cur_length = Some(read_u32(&entry[8..12]).try_into()?),
+                JPEG_TAG => cur_offset = Some(read_u32(&entry[8..12]).try_into()?),
+                JPEG_LENGTH_TAG => cur_length = Some(read_u32(&entry[8..12]).try_into()?),
                 _ => {}
             }
 
