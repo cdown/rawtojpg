@@ -137,9 +137,11 @@ async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
 
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
     println!("{}", relative_path.display());
-    let in_file = File::open(entry_path).await?;
-    let raw_fd = in_file.as_raw_fd();
-    let raw_buf = mmap_raw(raw_fd).await?;
+    let raw_buf = {
+        // No need to hold both the open() and mmap() refs
+        let in_file = File::open(entry_path).await?;
+        mmap_raw(in_file.as_raw_fd()).await?
+    };
     let jpeg_buf = extract_jpeg(&raw_buf)?;
     let mut output_file = out_dir.join(relative_path);
     output_file.set_extension("jpg");
