@@ -2,7 +2,6 @@ use anyhow::{ensure, Result};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use clap::Parser;
 use memmap2::{Advice, Mmap};
-use nix::fcntl::{posix_fadvise, PosixFadviseAdvice};
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::io::AsRawFd;
@@ -36,11 +35,8 @@ struct Args {
 
 async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
-    posix_fadvise(raw_fd, 0, 0, PosixFadviseAdvice::POSIX_FADV_RANDOM)?;
-
     let raw_buf = unsafe { Mmap::map(raw_fd)? };
     raw_buf.advise(Advice::Random)?;
-
     Ok(raw_buf)
 }
 
@@ -125,18 +121,10 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     Ok(largest_jpeg)
 }
 
-fn extract_jpeg(raw_fd: i32, raw_buf: &Mmap) -> Result<&[u8]> {
+fn extract_jpeg(raw_buf: &Mmap) -> Result<&[u8]> {
     let jpeg = find_largest_embedded_jpeg(raw_buf)?;
 
-    posix_fadvise(
-        raw_fd,
-        jpeg.offset as i64,
-        jpeg.length as i64,
-        PosixFadviseAdvice::POSIX_FADV_WILLNEED,
-    )?;
-
     raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
-    raw_buf.advise_range(Advice::PopulateRead, jpeg.offset, jpeg.length)?;
 
     Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
@@ -152,7 +140,7 @@ async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -
     let in_file = File::open(entry_path).await?;
     let raw_fd = in_file.as_raw_fd();
     let raw_buf = mmap_raw(raw_fd).await?;
-    let jpeg_buf = extract_jpeg(raw_fd, &raw_buf)?;
+    let jpeg_buf = extract_jpeg(&raw_buf)?;
     let mut output_file = out_dir.join(relative_path);
     output_file.set_extension("jpg");
     write_jpeg(&output_file, jpeg_buf).await?;

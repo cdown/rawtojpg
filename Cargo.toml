@@ -21,11 +21,6 @@ version = "4.5.4"
 features = ["std", "derive", "help"]
 default-features = false
 
-[dependencies.nix]
-version = "0.28.0"
-features = ["feature", "fs", "mman"]
-default-features = false
-
 [dependencies.tokio]
 version = "1.37.0"
 features = ["fs", "io-util", "macros", "rt-multi-thread", "sync"]
