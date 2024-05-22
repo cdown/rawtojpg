@@ -1,6 +1,7 @@
 use anyhow::{ensure, Result};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::{Advice, Mmap};
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -136,7 +137,6 @@ async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
 }
 
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
-    println!("{}", relative_path.display());
     let raw_buf = {
         // No need to hold both the open() and mmap() refs
         let in_file = File::open(entry_path).await?;
@@ -191,6 +191,13 @@ async fn process_directory(
         }
     }
 
+    let progress_bar = ProgressBar::new(entries.len() as u64);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{pos}/{len} [{bar}] (ETA: {eta})")?
+            .progress_chars("##-"),
+    );
+
     let semaphore = Arc::new(Semaphore::new(transfers));
     let mut tasks = Vec::new();
 
@@ -198,10 +205,12 @@ async fn process_directory(
         let semaphore = semaphore.clone();
         let out_dir = out_dir.to_path_buf();
         let relative_path = in_path.strip_prefix(in_dir)?.to_path_buf();
+        let progress_bar = progress_bar.clone();
         let task = tokio::spawn(async move {
             let permit = semaphore.acquire_owned().await?;
             let result = process_file(&in_path, &out_dir, &relative_path).await;
             drop(permit);
+            progress_bar.inc(1);
             if let Err(e) = &result {
                 eprintln!("Error processing file {}: {:?}", in_path.display(), e);
             }
