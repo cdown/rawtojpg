@@ -3,8 +3,8 @@
 executable="target/profiling/rawtojpg"
 input_dir="${INPUT_DIR:-/mnt/sdcard/DCIM/101MSDCF}"
 output_dir="${OUTPUT_DIR:-/home/cdown/testdir}"
-runs=50
-warmups=5
+runs=${RUNS:-50}
+warmups=${WARMUPS:-5}
 
 nice_cmd=(sudo nice -n -20 ionice -c 1 -n 0 sudo -u "${USER?}")
 prepare_cmd="sh -c 'rm -rf $output_dir; mkdir $output_dir' && sudo sh -c 'sync && echo 3 > /proc/sys/vm/drop_caches'"
