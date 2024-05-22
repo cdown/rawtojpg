@@ -203,12 +203,11 @@ async fn process_directory(
 
     for in_path in entries {
         let semaphore = semaphore.clone();
-        let out_dir = out_dir.to_path_buf();
         let relative_path = in_path.strip_prefix(in_dir)?.to_path_buf();
         let progress_bar = progress_bar.clone();
         let task = tokio::spawn(async move {
             let permit = semaphore.acquire_owned().await?;
-            let result = process_file(&in_path, &out_dir, &relative_path).await;
+            let result = process_file(&in_path, out_dir, &relative_path).await;
             drop(permit);
             progress_bar.inc(1);
             if let Err(e) = &result {
@@ -230,9 +229,9 @@ async fn process_directory(
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let output_dir = Box::leak(Box::new(args.output_dir)); // It's gonna get used for each raw file and
-                                                           // would need a copy for .filter_map(),
-                                                           // better to just make it &'static
+    let output_dir = Box::leak(Box::new(args.output_dir)); // Would need a copy for each task
+                                                           // otherwise, so better to just make it
+                                                           // &'static
 
     fs::create_dir_all(&output_dir).await?;
     process_directory(&args.input_dir, output_dir, args.extension, args.transfers).await?;
