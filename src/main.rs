@@ -35,8 +35,22 @@ struct Args {
 }
 
 fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
-    // We only access a small part of the file, don't read in more than necessary.
+    // SAFETY: mmap in general is unsafe because the lifecycle of the backing bytes are mutable
+    // from outside the program.
+    //
+    // This means that, among other things, I/O errors can abort the program (e.g. by SIGBUS). This
+    // is not a big problem, since we are just a command line program and have control over the
+    // entire execution lifecycle.
+    //
+    // Also, any guarantees around validation (like taking a string slice from the &[u8]) are also
+    // only enforced at creation time, so it's possible for the underlying file to cause corruption
+    // (and thus UB). However, in our case, that's not a problem: we don't rely on such
+    // enforcement.
     let raw_buf = unsafe { Mmap::map(raw_fd)? };
+
+    // Avoid overread into the rest of the RAW, which degrades performance substantially. We will
+    // later update the advice for the JPEG section with Advice::WillNeed. Until then, our accesses
+    // are essentially random: we walk the IFDs, but these are likely in non-sequential pages.
     raw_buf.advise(Advice::Random)?;
     Ok(raw_buf)
 }
