@@ -34,7 +34,7 @@ struct Args {
     extension: Option<OsString>,
 }
 
-fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
+fn mmap_raw(file: File) -> Result<Mmap> {
     // SAFETY: mmap in general is unsafe because the lifecycle of the backing bytes are mutable
     // from outside the program.
     //
@@ -46,7 +46,7 @@ fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // only enforced at creation time, so it's possible for the underlying file to cause corruption
     // (and thus UB). However, in our case, that's not a problem: we don't rely on such
     // enforcement.
-    let raw_buf = unsafe { Mmap::map(raw_fd)? };
+    let raw_buf = unsafe { Mmap::map(file.as_raw_fd())? };
 
     // Avoid overread into the rest of the RAW, which degrades performance substantially. We will
     // later update the advice for the JPEG section with Advice::WillNeed. Until then, our accesses
@@ -149,11 +149,8 @@ async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
 }
 
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
-    let raw_buf = {
-        // No need to hold both the open() and mmap() refs
-        let in_file = File::open(entry_path).await?;
-        mmap_raw(in_file.as_raw_fd())?
-    };
+    let in_file = File::open(entry_path).await?;
+    let raw_buf = mmap_raw(in_file)?;
     let jpeg_buf = extract_jpeg(&raw_buf)?;
     let mut output_file = out_dir.join(relative_path);
     output_file.set_extension("jpg");
