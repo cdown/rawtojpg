@@ -191,7 +191,7 @@ async fn process_directory(
         }
     }
 
-    let progress_bar = ProgressBar::new(entries.len() as u64);
+    let progress_bar = ProgressBar::new(entries.len().try_into()?);
     progress_bar.set_style(
         ProgressStyle::default_bar()
             .template("{pos}/{len} [{bar}] (ETA: {eta})")?
