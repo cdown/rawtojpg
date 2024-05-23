@@ -34,7 +34,7 @@ struct Args {
     extension: Option<OsString>,
 }
 
-async fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
+fn mmap_raw(raw_fd: i32) -> Result<Mmap> {
     // We only access a small part of the file, don't read in more than necessary.
     let raw_buf = unsafe { Mmap::map(raw_fd)? };
     raw_buf.advise(Advice::Random)?;
@@ -140,7 +140,7 @@ async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -
     let raw_buf = {
         // No need to hold both the open() and mmap() refs
         let in_file = File::open(entry_path).await?;
-        mmap_raw(in_file.as_raw_fd()).await?
+        mmap_raw(in_file.as_raw_fd())?
     };
     let jpeg_buf = extract_jpeg(&raw_buf)?;
     let mut output_file = out_dir.join(relative_path);
