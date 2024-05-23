@@ -138,9 +138,7 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
 
 fn extract_jpeg(raw_buf: &Mmap) -> Result<&[u8]> {
     let jpeg = find_largest_embedded_jpeg(raw_buf)?;
-
     raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
-
     Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
 
