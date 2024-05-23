@@ -241,9 +241,8 @@ async fn process_directory(
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let output_dir = Box::leak(Box::new(args.output_dir)); // Would need a copy for each task
-                                                           // otherwise, so better to just make it
-                                                           // &'static
+    // We would need a copy for each task otherwise, so better just to make it &'static
+    let output_dir = Box::leak(Box::new(args.output_dir));
 
     fs::create_dir_all(&output_dir).await?;
     process_directory(&args.input_dir, output_dir, args.extension, args.transfers).await?;
