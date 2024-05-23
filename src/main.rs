@@ -34,6 +34,7 @@ struct Args {
     extension: Option<OsString>,
 }
 
+/// Map a RAW file into memory using `mmap()`. The file must be static.
 fn mmap_raw(file: File) -> Result<Mmap> {
     // SAFETY: mmap in general is unsafe because the lifecycle of the backing bytes are mutable
     // from outside the program.
@@ -55,15 +56,21 @@ fn mmap_raw(file: File) -> Result<Mmap> {
     Ok(raw_buf)
 }
 
+/// An embedded JPEG in a RAW file.
 #[derive(Default, Eq, PartialEq)]
 struct EmbeddedJpegInfo {
     offset: usize,
     length: usize,
 }
 
-/// We do this by hand because EXIF libraries don't fit requirements:
+/// Find the largest embedded JPEG in a memory-mapped RAW buffer.
 ///
-/// - kamadak-exif: Reads into a big Vec<u8>, which is huge for our big RAW.
+/// This function parses the IFDs in the TIFF structure of the RAW file to find the largest JPEG
+/// thumbnail embedded in the file.
+///
+/// We hand roll the IFD parsing because libraries do not fit requirements. For example:
+///
+/// - kamadak-exif: Reads into a big `Vec<u8>`, which is huge for our big RAW.
 /// - quickexif: Cannot iterate over IFDs.
 fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     const IFD_ENTRY_SIZE: usize = 12;
@@ -142,22 +149,31 @@ fn extract_jpeg(raw_buf: &Mmap) -> Result<&[u8]> {
     Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
 
-async fn write_jpeg(output_file: &Path, jpeg_buf: &[u8]) -> Result<()> {
+async fn write_file(output_file: &Path, buf: &[u8]) -> Result<()> {
     let mut out_file = File::create(output_file).await?;
-    out_file.write_all(jpeg_buf).await?;
+    out_file.write_all(buf).await?;
     Ok(())
 }
 
+/// Process a single RAW file to extract the embedded JPEG, and then write the extracted JPEG to
+/// the output directory.
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
     let in_file = File::open(entry_path).await?;
     let raw_buf = mmap_raw(in_file)?;
     let jpeg_buf = extract_jpeg(&raw_buf)?;
     let mut output_file = out_dir.join(relative_path);
     output_file.set_extension("jpg");
-    write_jpeg(&output_file, jpeg_buf).await?;
+    write_file(&output_file, jpeg_buf).await?;
     Ok(())
 }
 
+/// Recursively process a directory of RAW files, extracting embedded JPEGs and writing them to the
+/// output directory.
+///
+/// This function recursively searches the input directory for RAW files with valid extensions,
+/// processes each file to extract the embedded JPEG, and writes the JPEGs to the corresponding
+/// location in the output directory. The directory structure relative to the input directory is
+/// maintained.
 async fn process_directory(
     in_dir: &Path,
     out_dir: &'static Path,
