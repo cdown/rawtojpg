@@ -2,7 +2,7 @@
 
 rawtojpg provides a much faster way to extract embedded JPEGs from RAW files
 than exiftool's `-JpgFromRaw`. In a directory with 4000 files, rawtojpg
-extracts JPEGs about 82 times faster than exiftool:
+extracts JPEGs about 15 times faster than exiftool:
 
     % rm -rf ~/rtj && mkdir -p ~/rtj/{rawtojpg, exiftool}
     % sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
@@ -23,7 +23,7 @@ extracts JPEGs about 82 times faster than exiftool:
         File system outputs: 22864400
 
 The total size of the output JPEGs is 11.5GiB, so in terms of throughput,
-rawtojpg does ~386MiB/s, and exiftool does ~24MiB/s -- about a 15x speedup.
+rawtojpg does ~386MiB/s, and exiftool does ~24MiB/s.
 
 The key reason rawtojpg is so much faster is because it very carefully avoids
 overreading into the entire RAW file. exiftool does not do that and suffers
