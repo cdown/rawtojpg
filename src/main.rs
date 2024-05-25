@@ -23,7 +23,7 @@ struct Args {
     output_dir: PathBuf,
 
     /// How many files to process at once
-    #[arg(short, long, default_value_t = 128)]
+    #[arg(short, long, default_value_t = 8)]
     transfers: usize,
 
     /// Look for this extension in addition to the default list.
