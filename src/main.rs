@@ -247,6 +247,8 @@ async fn process_directory(
         task.await??;
     }
 
+    progress_bar.finish();
+
     Ok(())
 }
 
