@@ -79,6 +79,8 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     const JPEG_TAG: u16 = 0x201;
     const JPEG_LENGTH_TAG: u16 = 0x202;
 
+    ensure!(raw_buf.len() >= 8, "Not enough data for TIFF header");
+
     let is_le = &raw_buf[0..4] == TIFF_MAGIC_LE;
     ensure!(
         is_le || &raw_buf[0..4] == TIFF_MAGIC_BE,
@@ -101,9 +103,17 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     let mut largest_jpeg = EmbeddedJpegInfo::default();
 
     while next_ifd_offset != 0 {
+        ensure!(next_ifd_offset + 2 <= raw_buf.len(), "Invalid IFD offset");
+
         let cursor = &raw_buf[next_ifd_offset..];
         let num_entries = read_u16(&cursor[..2]).into();
         let entries_cursor = &cursor[2..];
+
+        let entries_len = num_entries * IFD_ENTRY_SIZE;
+        ensure!(
+            entries_cursor.len() >= entries_len,
+            "Invalid number of IFD entries"
+        );
 
         let mut cur_offset = None;
         let mut cur_length = None;
@@ -128,7 +138,12 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
             }
         }
 
-        next_ifd_offset = read_u32(&cursor[2 + num_entries * IFD_ENTRY_SIZE..][..4]).try_into()?;
+        let next_ifd_offset_offset = 2 + entries_len;
+        ensure!(
+            cursor.len() >= next_ifd_offset_offset + 4,
+            "Invalid next IFD offset"
+        );
+        next_ifd_offset = read_u32(&cursor[next_ifd_offset_offset..][..4]).try_into()?;
     }
 
     ensure!(
