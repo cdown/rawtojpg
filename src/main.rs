@@ -217,7 +217,7 @@ async fn process_directory(
                 dir_queue.push(path);
             } else if path
                 .extension()
-                .map_or(false, |ext| valid_extensions.contains(ext))
+                .is_some_and(|ext| valid_extensions.contains(ext))
             {
                 found_raw = true;
                 entries.push(path);
