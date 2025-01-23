@@ -61,9 +61,10 @@ fn mmap_raw(file: File) -> Result<Mmap> {
 struct EmbeddedJpegInfo {
     offset: usize,
     length: usize,
+    orientation: Option<u16>,
 }
 
-/// Find the largest embedded JPEG in a memory-mapped RAW buffer.
+/// Find the largest embedded JPEG data in a memory-mapped RAW buffer.
 ///
 /// This function parses the IFDs in the TIFF structure of the RAW file to find the largest JPEG
 /// thumbnail embedded in the file.
@@ -78,6 +79,7 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     const TIFF_MAGIC_BE: &[u8] = b"MM\0*";
     const JPEG_TAG: u16 = 0x201;
     const JPEG_LENGTH_TAG: u16 = 0x202;
+    const ORIENTATION_TAG: u16 = 0x112;
 
     ensure!(raw_buf.len() >= 8, "Not enough data for TIFF header");
 
@@ -117,6 +119,7 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
 
         let mut cur_offset = None;
         let mut cur_length = None;
+        let mut cur_orientation = None;
 
         for entry in entries_cursor
             .chunks_exact(IFD_ENTRY_SIZE)
@@ -127,12 +130,17 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
             match tag {
                 JPEG_TAG => cur_offset = Some(read_u32(&entry[8..12]).try_into()?),
                 JPEG_LENGTH_TAG => cur_length = Some(read_u32(&entry[8..12]).try_into()?),
+                ORIENTATION_TAG => cur_orientation = Some(read_u16(&entry[8..10])),
                 _ => {}
             }
 
             if let (Some(offset), Some(length)) = (cur_offset, cur_length) {
                 if length > largest_jpeg.length {
-                    largest_jpeg = EmbeddedJpegInfo { offset, length };
+                    largest_jpeg = EmbeddedJpegInfo {
+                        offset,
+                        length,
+                        orientation: cur_orientation,
+                    };
                 }
                 break;
             }
@@ -158,15 +166,43 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     Ok(largest_jpeg)
 }
 
-fn extract_jpeg(raw_buf: &Mmap) -> Result<&[u8]> {
-    let jpeg = find_largest_embedded_jpeg(raw_buf)?;
+fn extract_jpeg<'raw>(raw_buf: &'raw Mmap, jpeg: &'raw EmbeddedJpegInfo) -> Result<&'raw [u8]> {
     raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
     Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
 
-async fn write_file(output_file: &Path, buf: &[u8]) -> Result<()> {
+/// The embedded JPEG comes with no EXIF data. While most of it is outside of the scope of this
+/// application, it's pretty vexing to have the wrong orientation, so copy that over.
+#[rustfmt::skip]
+fn get_app1_bytes(orientation: u16) -> Vec<u8> {
+    let orientation_bytes = orientation.to_le_bytes();
+    Vec::from([
+        0xff, 0xe1, // APP1
+        0x00, 0x1e, // 30 bytes including this length
+        0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // Exif\0\0
+        0x49, 0x49, 0x2A, 0x00, // TIFF LE
+        0x08, 0x00, 0x00, 0x00, // Offset to IFD
+        0x01, 0x00, // One entry in IFD
+        0x12, 0x01, // Tag for orientation
+        0x03, 0x00, // Type: SHORT
+        0x01, 0x00, 0x00, 0x00, // Count: 1
+        orientation_bytes[0], orientation_bytes[1], // Orientation
+        0x00, 0x00, // Next IFD
+    ])
+}
+
+async fn write_jpeg(
+    output_file: &Path,
+    jpeg_buf: &[u8],
+    jpeg_info: &EmbeddedJpegInfo,
+) -> Result<()> {
     let mut out_file = File::create(output_file).await?;
-    out_file.write_all(buf).await?;
+    out_file.write_all(&[0xFF, 0xD8]).await?; // SOI marker
+    if let Some(orient) = jpeg_info.orientation {
+        let app1_bytes = get_app1_bytes(orient);
+        out_file.write_all(&app1_bytes).await?;
+    }
+    out_file.write_all(&jpeg_buf[2..]).await?;
     Ok(())
 }
 
@@ -175,10 +211,11 @@ async fn write_file(output_file: &Path, buf: &[u8]) -> Result<()> {
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
     let in_file = File::open(entry_path).await?;
     let raw_buf = mmap_raw(in_file)?;
-    let jpeg_buf = extract_jpeg(&raw_buf)?;
+    let jpeg_info = find_largest_embedded_jpeg(&raw_buf)?;
+    let jpeg_buf = extract_jpeg(&raw_buf, &jpeg_info)?;
     let mut output_file = out_dir.join(relative_path);
     output_file.set_extension("jpg");
-    write_file(&output_file, jpeg_buf).await?;
+    write_jpeg(&output_file, jpeg_buf, &jpeg_info).await?;
     Ok(())
 }
 
