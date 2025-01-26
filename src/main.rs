@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{bail, ensure, Result};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -219,6 +219,11 @@ async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -
     Ok(())
 }
 
+struct ProcessingResult {
+    result: Result<()>,
+    path: PathBuf,
+}
+
 /// Recursively process a directory of RAW files, extracting embedded JPEGs and writing them to the
 /// output directory.
 ///
@@ -282,24 +287,34 @@ async fn process_directory(
         let semaphore = semaphore.clone();
         let relative_path = in_path.strip_prefix(in_dir)?.to_path_buf();
         let progress_bar = progress_bar.clone();
-        let task = tokio::spawn(async move {
+        let task: tokio::task::JoinHandle<Result<ProcessingResult>> = tokio::spawn(async move {
             let permit = semaphore.acquire_owned().await?;
             let result = process_file(&in_path, out_dir, &relative_path).await;
             drop(permit);
             progress_bar.inc(1);
-            if let Err(e) = &result {
-                eprintln!("Error processing file {}: {:?}", in_path.display(), e);
-            }
-            result
+            Ok(ProcessingResult {
+                result,
+                path: in_path,
+            })
         });
         tasks.push(task);
     }
 
+    let mut nr_failed = 0;
     for task in tasks {
-        task.await??;
+        let pr_res = task.await??;
+        if let Err(e) = pr_res.result {
+            nr_failed += 1;
+            let msg = format!("Error processing file {}: {:?}", pr_res.path.display(), e);
+            progress_bar.println(msg);
+        }
     }
 
-    progress_bar.finish();
+    progress_bar.abandon();
+
+    if nr_failed != 0 {
+        bail!("Failed to process {} files", nr_failed);
+    }
 
     Ok(())
 }
