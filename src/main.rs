@@ -281,7 +281,7 @@ async fn process_directory(
     );
 
     let semaphore = Arc::new(Semaphore::new(transfers));
-    let mut tasks = Vec::new();
+    let mut tasks = Vec::with_capacity(entries.len());
 
     for in_path in entries {
         let semaphore = semaphore.clone();
