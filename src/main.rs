@@ -2,15 +2,24 @@ use anyhow::{bail, ensure, Result};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use memmap2::{Advice, Mmap};
+use memmap2::Mmap;
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
+
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+mod windows;
+
+#[cfg(unix)]
+use unix as platform;
+#[cfg(windows)]
+use windows as platform;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -32,28 +41,6 @@ struct Args {
     /// rwl, sr2, srf, srw, x3f
     #[arg(short, long)]
     extension: Option<OsString>,
-}
-
-/// Map a RAW file into memory using `mmap()`. The file must be static.
-fn mmap_raw(file: File) -> Result<Mmap> {
-    // SAFETY: mmap in general is unsafe because the lifecycle of the backing bytes are mutable
-    // from outside the program.
-    //
-    // This means that, among other things, I/O errors can abort the program (e.g. by SIGBUS). This
-    // is not a big problem, since we are just a command line program and have control over the
-    // entire execution lifecycle.
-    //
-    // Also, any guarantees around validation (like taking a string slice from the &[u8]) are also
-    // only enforced at creation time, so it's possible for the underlying file to cause corruption
-    // (and thus UB). However, in our case, that's not a problem: we don't rely on such
-    // enforcement.
-    let raw_buf = unsafe { Mmap::map(file.as_raw_fd())? };
-
-    // Avoid overread into the rest of the RAW, which degrades performance substantially. We will
-    // later update the advice for the JPEG section with Advice::WillNeed. Until then, our accesses
-    // are essentially random: we walk the IFDs, but these are likely in non-sequential pages.
-    raw_buf.advise(Advice::Random)?;
-    Ok(raw_buf)
 }
 
 /// An embedded JPEG in a RAW file.
@@ -166,8 +153,9 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     Ok(largest_jpeg)
 }
 
+/// Extract the JPEG bytes from the memory-mapped RAW buffer.
 fn extract_jpeg<'raw>(raw_buf: &'raw Mmap, jpeg: &'raw EmbeddedJpegInfo) -> Result<&'raw [u8]> {
-    raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
+    platform::prefetch_jpeg(raw_buf, jpeg)?;
     Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
 
@@ -209,8 +197,8 @@ async fn write_jpeg(
 /// Process a single RAW file to extract the embedded JPEG, and then write the extracted JPEG to
 /// the output directory.
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
-    let in_file = File::open(entry_path).await?;
-    let raw_buf = mmap_raw(in_file)?;
+    let in_file = platform::open_raw(entry_path).await?;
+    let raw_buf = platform::mmap_raw(in_file)?;
     let jpeg_info = find_largest_embedded_jpeg(&raw_buf)?;
     let jpeg_buf = extract_jpeg(&raw_buf, &jpeg_info)?;
     let mut output_file = out_dir.join(relative_path);

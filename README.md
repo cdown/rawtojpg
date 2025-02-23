@@ -28,7 +28,7 @@ rawtojpg does ~386MiB/s, and exiftool does ~24MiB/s.
 The key reason rawtojpg is so much faster is because it very carefully avoids
 overreading into the entire RAW file. exiftool does not do that and suffers
 quite greatly in (useful) throughput as a result. This is achieved through
-judicious use of `madvise`.
+judicious use of `madvise` (and similar strategies on other platforms).
 
 Other than that, rawtojpg also processes multiple files concurrently, which can
 help a lot on faster devices like CFexpress cards.
