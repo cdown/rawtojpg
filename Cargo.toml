@@ -1,10 +1,10 @@
 [package]
-name = "rawtojpg"
+name = "jpgfromraw"
 edition = "2021"
 version = "0.6.0"
 authors = ["Chris Down <chris@chrisdown.name>"]
 description = "A very fast embedded JPEG extractor from RAW files."
-repository = "https://github.com/cdown/rawtojpg"
+repository = "https://github.com/cdown/jpgfromraw"
 readme = "README.md"
 keywords = ["raw", "camera", "extract", "jpeg", "jpg"]
 categories = ["command-line-utilities"]

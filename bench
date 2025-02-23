@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-executable="target/profiling/rawtojpg"
+executable="target/profiling/jpgfromraw"
 input_dir="${INPUT_DIR:-/mnt/sdcard/DCIM/101MSDCF}"
 output_dir="${OUTPUT_DIR:-/home/cdown/testdir}"
 runs=${RUNS:-50}

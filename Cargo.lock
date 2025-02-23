@@ -151,6 +151,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpgfromraw"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "clap",
+ "indicatif",
+ "memmap2",
+ "tokio",
+ "windows",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -245,19 +258,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e4dccaaaf89514f546c693ddc140f729f958c247918a13380cccc6078391acc"
 dependencies = [
  "proc-macro2",
-]
-
-[[package]]
-name = "rawtojpg"
-version = "0.6.0"
-dependencies = [
- "anyhow",
- "byteorder",
- "clap",
- "indicatif",
- "memmap2",
- "tokio",
- "windows",
 ]
 
 [[package]]
