@@ -2,15 +2,26 @@ use anyhow::{bail, ensure, Result};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use memmap2::{Advice, Mmap};
+use memmap2::Mmap;
+
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
+use memmap2::Advice;
+
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
+
+#[cfg(windows)]
+use windows::Win32::Storage::FileSystem::FILE_FLAG_RANDOM_ACCESS;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -47,13 +58,21 @@ fn mmap_raw(file: File) -> Result<Mmap> {
     // only enforced at creation time, so it's possible for the underlying file to cause corruption
     // (and thus UB). However, in our case, that's not a problem: we don't rely on such
     // enforcement.
-    let raw_buf = unsafe { Mmap::map(file.as_raw_fd())? };
-
-    // Avoid overread into the rest of the RAW, which degrades performance substantially. We will
-    // later update the advice for the JPEG section with Advice::WillNeed. Until then, our accesses
-    // are essentially random: we walk the IFDs, but these are likely in non-sequential pages.
-    raw_buf.advise(Advice::Random)?;
-    Ok(raw_buf)
+    #[cfg(unix)]
+    {
+        let raw_buf = unsafe { Mmap::map(file.as_raw_fd())? };
+        // Avoid overread into the rest of the RAW, which degrades performance substantially. We will
+        // later update the advice for the JPEG section with Advice::WillNeed. Until then, our accesses
+        // are essentially random: we walk the IFDs, but these are likely in non-sequential pages.
+        raw_buf.advise(Advice::Random)?;
+        Ok(raw_buf)
+    }
+    #[cfg(windows)]
+    {
+        let raw_buf = unsafe { Mmap::map(file.as_raw_handle())? };
+        // On Windows we rely on the random‑access flag passed during open.
+        Ok(raw_buf)
+    }
 }
 
 /// An embedded JPEG in a RAW file.
@@ -166,8 +185,48 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     Ok(largest_jpeg)
 }
 
+#[cfg(windows)]
+mod win_prefetch {
+    use std::io;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Memory::{PrefetchVirtualMemory, WIN32_MEMORY_RANGE_ENTRY};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    pub fn prefetch_memory(addr: *const u8, len: usize) -> io::Result<()> {
+        unsafe {
+            // Prepare the process handle and the single WIN32_MEMORY_RANGE_ENTRY
+            let process: HANDLE = GetCurrentProcess();
+            let entry = [WIN32_MEMORY_RANGE_ENTRY {
+                VirtualAddress: addr as *mut _,
+                NumberOfBytes: len,
+            }];
+
+            // The third parameter is a flags value, so pass 0 if no flags are needed.
+            // PrefetchVirtualMemory returns a windows::core::Result<()>, which needs conversion to io::Result<()>
+            PrefetchVirtualMemory(process, &entry, 0)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
+        }
+        Ok(())
+    }
+}
+
+/// On Unix, prefetch the JPEG region by advising with WillNeed; on Windows, call PrefetchVirtualMemory.
+fn prefetch_jpeg(raw_buf: &Mmap, jpeg: &EmbeddedJpegInfo) -> Result<()> {
+    #[cfg(unix)]
+    {
+        raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        win_prefetch::prefetch_memory(unsafe { raw_buf.as_ptr().add(jpeg.offset) }, jpeg.length)?;
+        Ok(())
+    }
+}
+
+/// Extract the JPEG bytes from the memory-mapped RAW buffer.
 fn extract_jpeg<'raw>(raw_buf: &'raw Mmap, jpeg: &'raw EmbeddedJpegInfo) -> Result<&'raw [u8]> {
-    raw_buf.advise_range(Advice::WillNeed, jpeg.offset, jpeg.length)?;
+    prefetch_jpeg(raw_buf, jpeg)?;
     Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
 }
 
@@ -206,10 +265,25 @@ async fn write_jpeg(
     Ok(())
 }
 
+#[cfg(unix)]
+async fn open_file_for_mapping(path: &Path) -> Result<File> {
+    Ok(File::open(path).await?)
+}
+
+#[cfg(windows)]
+async fn open_file_for_mapping(path: &Path) -> Result<File> {
+    use tokio::fs::OpenOptions;
+    Ok(OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_RANDOM_ACCESS.0)
+        .open(path)
+        .await?)
+}
+
 /// Process a single RAW file to extract the embedded JPEG, and then write the extracted JPEG to
 /// the output directory.
 async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
-    let in_file = File::open(entry_path).await?;
+    let in_file = open_file_for_mapping(entry_path).await?;
     let raw_buf = mmap_raw(in_file)?;
     let jpeg_info = find_largest_embedded_jpeg(&raw_buf)?;
     let jpeg_buf = extract_jpeg(&raw_buf, &jpeg_info)?;
@@ -241,10 +315,10 @@ async fn process_directory(
         "arw", "cr2", "crw", "dng", "erf", "kdc", "mef", "mrw", "nef", "nrw", "orf", "pef", "raf",
         "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f",
     ]
-    .iter()
-    .flat_map(|&ext| [OsString::from(ext), OsString::from(ext.to_uppercase())])
-    .chain(ext.into_iter())
-    .collect::<HashSet<_>>();
+        .iter()
+        .flat_map(|&ext| [OsString::from(ext), OsString::from(ext.to_uppercase())])
+        .chain(ext.into_iter())
+        .collect::<HashSet<_>>();
 
     let mut entries = Vec::new();
     let mut dir_queue = vec![in_dir.to_path_buf()];
