@@ -187,12 +187,11 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
 
 #[cfg(windows)]
 mod win_prefetch {
-    use std::io;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Memory::{PrefetchVirtualMemory, WIN32_MEMORY_RANGE_ENTRY};
     use windows::Win32::System::Threading::GetCurrentProcess;
 
-    pub fn prefetch_memory(addr: *const u8, len: usize) -> io::Result<()> {
+    pub fn prefetch_memory(addr: *const u8, len: usize) -> anyhow::Result<()> {
         unsafe {
             // Prepare the process handle and the single WIN32_MEMORY_RANGE_ENTRY
             let process: HANDLE = GetCurrentProcess();
@@ -203,8 +202,7 @@ mod win_prefetch {
 
             // The third parameter is a flags value, so pass 0 if no flags are needed.
             // PrefetchVirtualMemory returns a windows::core::Result<()>, which needs conversion to io::Result<()>
-            PrefetchVirtualMemory(process, &entry, 0)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
+            PrefetchVirtualMemory(process, &entry, 0)?
         }
         Ok(())
     }
@@ -272,6 +270,7 @@ async fn open_file_for_mapping(path: &Path) -> Result<File> {
 
 #[cfg(windows)]
 async fn open_file_for_mapping(path: &Path) -> Result<File> {
+    // There's no MADV_RANDOM equivalent later, we need to do it at open time.
     use tokio::fs::OpenOptions;
     Ok(OpenOptions::new()
         .read(true)
