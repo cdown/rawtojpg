@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use memmap2::Mmap;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
@@ -24,6 +24,15 @@ pub async fn open_raw(path: &Path) -> Result<File> {
 }
 
 pub fn prefetch_jpeg(raw_buf: &Mmap, jpeg: &crate::EmbeddedJpegInfo) -> Result<()> {
+    ensure!(
+        jpeg.offset + jpeg.length <= raw_buf.len(),
+        "JPEG data is out of bounds"
+    );
+
+    // SAFETY: The `ensure!` above guarantees that the range [jpeg.offset, jpeg.offset +
+    // jpeg.length) is within the bounds of `raw_buf`, so `raw_buf.as_ptr().add(jpeg.offset)`
+    // produces a valid pointer, and it's fine to give jpeg.length as NumberOfBytes. The rest is
+    // just simple FFI.
     unsafe {
         let process = GetCurrentProcess();
         let entry = [WIN32_MEMORY_RANGE_ENTRY {
