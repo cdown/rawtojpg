@@ -162,9 +162,9 @@ fn extract_jpeg<'raw>(raw_buf: &'raw Mmap, jpeg: &'raw EmbeddedJpegInfo) -> Resu
 /// The embedded JPEG comes with no EXIF data. While most of it is outside of the scope of this
 /// application, it's pretty vexing to have the wrong orientation, so copy that over.
 #[rustfmt::skip]
-fn get_app1_bytes(orientation: u16) -> Vec<u8> {
+const fn get_app1_bytes(orientation: u16) -> [u8; 32] {
     let orientation_bytes = orientation.to_le_bytes();
-    Vec::from([
+    [
         0xff, 0xe1, // APP1
         0x00, 0x1e, // 30 bytes including this length
         0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // Exif\0\0
@@ -176,7 +176,7 @@ fn get_app1_bytes(orientation: u16) -> Vec<u8> {
         0x01, 0x00, 0x00, 0x00, // Count: 1
         orientation_bytes[0], orientation_bytes[1], // Orientation
         0x00, 0x00, // Next IFD
-    ])
+    ]
 }
 
 async fn write_jpeg(
