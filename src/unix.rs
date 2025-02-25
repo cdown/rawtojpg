@@ -16,8 +16,6 @@ pub fn mmap_raw(file: File) -> Result<Mmap> {
     // only enforced at creation time, so it's possible for the underlying file to cause corruption
     // (and thus UB). However, in our case, that's not a problem: we don't rely on such
     // enforcement.
-    // SAFETY: mmap in general is unsafe because the lifecycle of the backing bytes are mutable
-    // from outside the program.
     let raw_buf = unsafe { Mmap::map(file.as_raw_fd())? };
 
     // Avoid overread into the rest of the RAW, which degrades performance substantially. We will
