@@ -4,7 +4,7 @@ jpgfromraw provides a much faster way to extract embedded JPEGs from RAW files
 than exiftool's `-JpgFromRaw`. In a directory with 4000 files, jpgfromraw
 extracts JPEGs about 15 times faster than exiftool:
 
-    % rm -rf ~/jfr && mkdir -p ~/jfr/{jpgfromraw, exiftool}
+    % rm -rf ~/jfr && mkdir -p ~/jfr/{jpgfromraw,exiftool}
     % sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
     % \time -v jpgfromraw /mnt/sdcard/DCIM/101MSDCF ~/jfr/jpgfromraw >/dev/null
         User time (seconds): 2.18
