@@ -5,6 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 use std::collections::HashSet;
 use std::ffi::OsString;
+use std::io::IoSlice;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{self, File};
@@ -187,8 +188,25 @@ async fn write_jpeg(
 ) -> Result<()> {
     let mut out_file = File::create(output_file).await?;
     let hdr_bytes = get_header_bytes(jpeg_info.orientation.unwrap_or(1)); // 1 is default
-    out_file.write_all(&hdr_bytes).await?; // SOI marker
-    out_file.write_all(&jpeg_buf[2..]).await?;
+    let mut header = hdr_bytes.as_ref();
+    let mut body = &jpeg_buf[2..];
+
+    while header.len() + body.len() > 0 {
+        let slices = [IoSlice::new(header), IoSlice::new(body)];
+        let n = out_file.write_vectored(&slices).await?;
+        ensure!(n > 0, "Vectored write failed");
+
+        if n < header.len() {
+            // We didn't get past the header yet, remove bytes from it
+            header = &header[n..];
+        } else {
+            // We are past the header and are in the body, remove bytes from the body
+            let n = n - header.len();
+            header = &[];
+            body = &body[n..];
+        }
+    }
+
     Ok(())
 }
 
