@@ -2,15 +2,16 @@ use anyhow::{bail, ensure, Result};
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use memmap2::Mmap;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::IoSlice;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 
 #[cfg(unix)]
 mod unix;
@@ -154,12 +155,6 @@ fn find_largest_embedded_jpeg(raw_buf: &[u8]) -> Result<EmbeddedJpegInfo> {
     Ok(largest_jpeg)
 }
 
-/// Extract the JPEG bytes from the memory-mapped RAW buffer.
-fn extract_jpeg<'raw>(raw_buf: &'raw Mmap, jpeg: &'raw EmbeddedJpegInfo) -> Result<&'raw [u8]> {
-    platform::prefetch_jpeg(raw_buf, jpeg)?;
-    Ok(&raw_buf[jpeg.offset..jpeg.offset + jpeg.length])
-}
-
 /// The embedded JPEG comes with no EXIF data. While most of it is outside of the scope of this
 /// application, it's pretty vexing to have the wrong orientation, so copy that over.
 #[rustfmt::skip]
@@ -210,22 +205,32 @@ async fn write_jpeg(
     Ok(())
 }
 
-/// Process a single RAW file to extract the embedded JPEG, and then write the extracted JPEG to
-/// the output directory.
-async fn process_file(entry_path: &Path, out_dir: &Path, relative_path: &Path) -> Result<()> {
+/// Process the file I/O phase: open, mmap, find JPEG, prefetch the JPEG data, wait for 500ms,
+/// and then copy the JPEG bytes into an owned Vec so that the file can be closed.
+/// This entire phase is executed under the semaphore to limit concurrently open files.
+async fn process_file_prefetch(entry_path: &Path) -> Result<(Vec<u8>, EmbeddedJpegInfo)> {
     let in_file = platform::open_raw(entry_path).await?;
     let raw_buf = platform::mmap_raw(in_file)?;
     let jpeg_info = find_largest_embedded_jpeg(&raw_buf)?;
-    let jpeg_buf = extract_jpeg(&raw_buf, &jpeg_info)?;
-    let mut output_file = out_dir.join(relative_path);
-    output_file.set_extension("jpg");
-    write_jpeg(&output_file, jpeg_buf, &jpeg_info).await?;
-    Ok(())
+    platform::prefetch_jpeg(&raw_buf, &jpeg_info)?;
+    // Wait 500ms while the file is still open to allow the OS to finish reading.
+    sleep(Duration::from_millis(500)).await;
+    // Copy the JPEG bytes into an owned Vec so that we can drop the mmap and close the file.
+    let jpeg_vec = raw_buf[jpeg_info.offset..jpeg_info.offset + jpeg_info.length].to_vec();
+    Ok((jpeg_vec, jpeg_info))
 }
 
-struct ProcessingResult {
-    result: Result<()>,
-    path: PathBuf,
+/// Process the writing phase: using the copied JPEG bytes, write the JPEG to disk.
+/// This phase happens after the file has been closed, so no file descriptor is held.
+async fn process_file_write(
+    jpeg_vec: Vec<u8>,
+    jpeg_info: EmbeddedJpegInfo,
+    out_dir: &Path,
+    relative_path: &Path,
+) -> Result<()> {
+    let mut output_file = out_dir.join(relative_path);
+    output_file.set_extension("jpg");
+    write_jpeg(&output_file, &jpeg_vec, &jpeg_info).await
 }
 
 /// Recursively process a directory of RAW files, extracting embedded JPEGs and writing them to the
@@ -291,10 +296,27 @@ async fn process_directory(
         let semaphore = semaphore.clone();
         let relative_path = in_path.strip_prefix(in_dir)?.to_path_buf();
         let progress_bar = progress_bar.clone();
+        // Spawn a new task for processing the file.
         let task: tokio::task::JoinHandle<Result<ProcessingResult>> = tokio::spawn(async move {
+            // Acquire semaphore permit for the file I/O phase (which includes prefetch and waiting).
             let permit = semaphore.acquire_owned().await?;
-            let result = process_file(&in_path, out_dir, &relative_path).await;
+            // Execute the file I/O phase.
+            let prefetch_result = process_file_prefetch(&in_path).await;
+            // Release the semaphore permit only after copying the JPEG data so that the file is closed.
             drop(permit);
+            // If prefetching failed, report the error.
+            let (jpeg_vec, jpeg_info) = match prefetch_result {
+                Ok(val) => val,
+                Err(e) => {
+                    progress_bar.inc(1);
+                    return Ok(ProcessingResult {
+                        result: Err(e),
+                        path: in_path,
+                    });
+                }
+            };
+            // Continue with the writing phase (file is now closed).
+            let result = process_file_write(jpeg_vec, jpeg_info, out_dir, &relative_path).await;
             progress_bar.inc(1);
             Ok(ProcessingResult {
                 result,
@@ -321,6 +343,11 @@ async fn process_directory(
     }
 
     Ok(())
+}
+
+struct ProcessingResult {
+    result: Result<()>,
+    path: PathBuf,
 }
 
 #[tokio::main]

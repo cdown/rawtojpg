@@ -27,5 +27,5 @@ default-features = false
 
 [dependencies.tokio]
 version = "1.43.0"
-features = ["fs", "io-util", "macros", "rt-multi-thread", "sync"]
+features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"]
 default-features = false
