@@ -162,9 +162,10 @@ fn extract_jpeg<'raw>(raw_buf: &'raw Mmap, jpeg: &'raw EmbeddedJpegInfo) -> Resu
 /// The embedded JPEG comes with no EXIF data. While most of it is outside of the scope of this
 /// application, it's pretty vexing to have the wrong orientation, so copy that over.
 #[rustfmt::skip]
-const fn get_app1_bytes(orientation: u16) -> [u8; 32] {
+const fn get_header_bytes(orientation: u16) -> [u8; 34] {
     let orientation_bytes = orientation.to_le_bytes();
     [
+        0xff, 0xd8, // SOI
         0xff, 0xe1, // APP1
         0x00, 0x1e, // 30 bytes including this length
         0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // Exif\0\0
@@ -185,11 +186,8 @@ async fn write_jpeg(
     jpeg_info: &EmbeddedJpegInfo,
 ) -> Result<()> {
     let mut out_file = File::create(output_file).await?;
-    out_file.write_all(&[0xFF, 0xD8]).await?; // SOI marker
-    if let Some(orient) = jpeg_info.orientation {
-        let app1_bytes = get_app1_bytes(orient);
-        out_file.write_all(&app1_bytes).await?;
-    }
+    let hdr_bytes = get_header_bytes(jpeg_info.orientation.unwrap_or(1)); // 1 is default
+    out_file.write_all(&hdr_bytes).await?; // SOI marker
     out_file.write_all(&jpeg_buf[2..]).await?;
     Ok(())
 }
